@@ -81,12 +81,22 @@ int main() {
     // 获取 Base 类型对象的虚表地址
     uintptr_t* baseVtable = *reinterpret_cast<uintptr_t**>(&baseObj);
     std::cout << "Base vtable address: " << baseVtable << '\n';
-    std::cout << ((std::type_info*)(baseVtable[-1]))->name() << '\n';
+    // std::type_info* type_info_obj1= reinterpret_cast<std::type_info*>(baseVtable[-1]);
+    std::type_info* type_info_obj1= reinterpret_cast<std::type_info*>(*(baseVtable-1));
+    std::cout << type_info_obj1->name() << '\n';
 
     // 获取 Derived 类型对象的虚表地址
     uintptr_t* derivedVtable = *reinterpret_cast<uintptr_t**>(&derivedObj);
     std::cout << "Derived vtable address: " << derivedVtable << '\n';
     std::cout << ((std::type_info*)(derivedVtable[-1]))->name() << '\n';
 
+
+    int a[] = {-4, -3, -2, -1};
+    int b[] = {0, 1, 2, 3};
+    int c[] = {4, 5, 6, 7};
+    
+    int* pb = b;
+    std::cout << a << " " << b << " " << c << '\n';
+    std::cout << *(pb+1) << " " << *(pb-1) << " " << pb[-1] << '\n';
     return 0;
 }
