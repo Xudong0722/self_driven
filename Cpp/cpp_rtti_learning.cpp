@@ -65,6 +65,10 @@ public:
     virtual void virtualFunction() {
         std::cout << "Base::virtualFunction\n";
     }
+
+    virtual void printHello() {
+        std::cout << "Base::Hello\n";
+    }
 };
 
 class Derived : public Base {
@@ -75,19 +79,30 @@ public:
 };
 
 int main() {
-    Base baseObj;
-    Derived derivedObj;
+    Base base_obj;
+    Derived derived_obj;
 
     // 获取 Base 类型对象的虚表地址
-    uintptr_t* baseVtable = *reinterpret_cast<uintptr_t**>(&baseObj);
-    std::cout << "Base vtable address: " << baseVtable << '\n';
-    // std::type_info* type_info_obj1= reinterpret_cast<std::type_info*>(baseVtable[-1]);
-    std::type_info* type_info_obj1= reinterpret_cast<std::type_info*>(*(baseVtable-1));
-    std::cout << type_info_obj1->name() << '\n';
+    // 这里使用unsigned long long 是为了可以拿到任何类型的指针
+    uintptr_t* base_vtable = *reinterpret_cast<uintptr_t**>(&base_obj);
+    std::cout << "Base vtable address: " << base_vtable << '\n';
 
+    // 获取Base 类型对象的type_info指针
+    // std::type_info* type_info_base= reinterpret_cast<std::type_info*>(base_vtable[-1]);
+    std::type_info* type_info_base= reinterpret_cast<std::type_info*>(*(base_vtable-1));
+    std::cout << type_info_base->name() << '\n';
+
+    // 直接通过vptr调用虚函数
+    using pfunc = void(*)();
+    pfunc base_virtual_func = reinterpret_cast<pfunc>((void*)(base_vtable[0]));
+    pfunc base_print_hello = (pfunc)base_vtable[1];
+    base_virtual_func();
+    base_print_hello();
+    
     // 获取 Derived 类型对象的虚表地址
-    uintptr_t* derivedVtable = *reinterpret_cast<uintptr_t**>(&derivedObj);
+    uintptr_t* derivedVtable = *reinterpret_cast<uintptr_t**>(&derived_obj);
     std::cout << "Derived vtable address: " << derivedVtable << '\n';
+    // 获取Derived 类型对象的type_info指针
     std::cout << ((std::type_info*)(derivedVtable[-1]))->name() << '\n';
 
 
