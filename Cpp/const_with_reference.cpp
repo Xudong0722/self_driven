@@ -36,7 +36,7 @@ int main()
     //---------------------------------
 
     //top-level const: can't change itself
-    //loc-level const: the related object can't be changed
+    //low-level const: the related object can't be changed
     int var{120};
     const int cv = var;  // top-level const
     const int* p2 = &cv; // low-level const
