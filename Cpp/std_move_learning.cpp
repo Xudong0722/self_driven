@@ -3,6 +3,16 @@
 #include <vector>
 #include <string>
  
+struct Test{
+    std::string title;
+    std::string descripation;
+
+    friend std::ostream& operator<<(std::ostream& output, const Test& test){
+        output << "[Test] " << test.title << " " << test.descripation << '\n';
+        return output;
+    }
+};
+
 int main()
 {
     std::string str = "Hello";
@@ -21,6 +31,15 @@ int main()
     std::cout << "After move, str is \"" << str << "\"\n";
  
     std::cout << "The contents of the vector are \"" << v[0] << "\", \"" << v[1] << "\"\n";
+    
 
+    Test test;
+    test.title = "title";
+    test.descripation = "descripation";
+    std::cout << test;
+    
+    Test obj;
+    obj = std::move(test);
+    std::cout << test << obj;
     return 0;
 }
