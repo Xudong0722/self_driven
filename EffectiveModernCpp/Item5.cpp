@@ -1,6 +1,8 @@
 #include <iostream>
 #include <functional>
 #include <vector>
+#include <unordered_map>
+#include <string>
 
 void do_something(int x){
     // do something with x
@@ -64,6 +66,22 @@ int main()
         // #define __SIZE_TYPE__ long unsigned int
         // #endif
         //注意这里，size_type 在不同平台下的定义不一样，所以使用auto可以完全匹配该平台下.size()的返回类型
+
+        std::unordered_map<std::string, int> m;
+        m.emplace("elvis", 111);
+        const std::string* p;
+        for(const std::pair<std::string, int>& elem : m){
+            // 会有一次拷贝， const std::string -> std::string
+            std::cout << elem.first << elem.second << '\n';
+            p = &elem.first;
+            std::cout << p << '\n';
+        }
+        std::cout << p << '\n';
+        
+        for(const auto& elem : m){
+            //elem: const std::pair<const std::string, int>
+            std::cout << elem.first << elem.second << '\n';
+        }
     }
 
     return 0;
