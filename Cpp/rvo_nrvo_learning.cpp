@@ -32,6 +32,7 @@ Test CreateTestDataWithNRVO(bool condition){
         return Test{};
     }
     return std::move(test);   // https://stackoverflow.com/questions/14856344/when-should-stdmove-be-used-on-a-function-return-value
+    //return test; 
 }
 
 //RVO:return value optimization
@@ -43,7 +44,7 @@ int main()
 {
     Test test_nrvo = CreateTestDataWithNRVO(true);
     std::cout << "[CreateTestDataWithNRVO] begin\n";
-    Test test_nrvo = CreateTestDataWithNRVO();
+    Test test_nrvo_ = CreateTestDataWithNRVO(true);
     std::cout << "[CreateTestDataWithNRVO] end\n";
 
     std::cout << "[CreateTestDataWithRVO] begin\n";

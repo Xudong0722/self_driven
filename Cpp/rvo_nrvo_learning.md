@@ -71,3 +71,42 @@ main()
 简单来说，就是直接在main函数局部对象test的地址上构造，而不需要借助临时对象，然后再执行拷贝构造或者移动构造。
 
 在这篇博客中，https://blog.csdn.net/Howl_1/article/details/122625409， 作者查看了函数的堆栈调用，得出结论，其实在函数中构造了一个对象，然后用main函数中局部对象test的地址接住了这个临时对象，并通过标记位跳过临时对象的析构。
+
+## 4.std::move
+
+https://stackoverflow.com/questions/14856344/when-should-stdmove-be-used-on-a-function-return-value
+
+不要过度使用std::move，比较下面两段代码
+
+```c++
+Test CreateTestDataWithNRVO(){
+    Test test{100};
+    //...
+    return std::move(test);
+}
+
+[CreateTestDataWithNRVO] begin
+[Test]100
+[Test] 0x61fdcc
+[Test Test&&] 0x61fe0c
+[~Test] 0x61fdcc
+[CreateTestDataWithNRVO] end
+[~Test] 0x61fe0c
+```
+
+```c++
+Test CreateTestDataWithNRVO(){
+    Test test{100};
+    //...
+    return test;
+}
+
+[CreateTestDataWithNRVO] begin
+[Test]100
+[Test] 0x61fe0c
+[CreateTestDataWithNRVO] end
+[~Test] 0x61fe0c
+```
+
+哪一个代码的效率更高呢，在编译器优化之后，第二段代码的效率更高，对于返回值使用了std::move将会，破坏NRVO的条件(返回的local variable不统一)，阻止编译器的NRVO优化。
+运行后，我们也能看出来，第一段代码进行了一次移动构造。

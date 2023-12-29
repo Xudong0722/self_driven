@@ -13,6 +13,18 @@ struct Test{
     }
 };
 
+Test CreateTest(){
+    Test t;
+    //...
+    return t;
+}
+
+Test CreateTestButUseMove(){
+    Test t;
+    //...
+    return std::move(t); //bad
+}
+
 int main()
 {
     std::string str = "Hello";
@@ -41,5 +53,13 @@ int main()
     Test obj;
     obj = std::move(test);
     std::cout << test << obj;
+
+
+    {
+        // Don't overuse std::move
+        Test t = CreateTest();  //This function will trigger NRVO
+
+        Test t = CreateTestButUseMove(); //This function will prevents NRVO
+    }
     return 0;
 }
