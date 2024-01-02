@@ -1,4 +1,18 @@
 #include <iostream>
+#include <tuple>
+#include <type_traits>
+
+//C++11 version
+template<typename E>
+constexpr typename std::underlying_type<E>::type user_info_type_c11(E enumerator) noexcept{
+    return static_cast<typename std::underlying_type<E>::type>(enumerator);
+}
+
+//C++14 version
+template<typename E>
+constexpr auto user_info_type_c14(E enumerator) noexcept{
+    return static_cast<std::underlying_type_t<E>>(enumerator);
+}
 
 int main()
 {
@@ -36,7 +50,7 @@ int main()
     }
 
     {
-        //2.unscoped enum不可以前置声明，因为编译器会根据enum内部实际定义的变量来决议类型
+        //3.unscoped enum不可以前置声明，因为编译器会根据enum内部实际定义的变量来决议类型
         enum Test1{test1_1};
         enum Test2{test2_1, test2_2 = 0xFFFFFFFFFF};
 
@@ -66,6 +80,25 @@ int main()
             // 由此可以，enum class是由默认的底层类型的，如需扩展，我们可以指定underlying type
         };
         fund(Test5::test5_1);
+    }
+
+    {
+        //Corner Case
+        using user_info = std::tuple<std::string, std::string, std::size_t, std::size_t>; // name, e-mail, age, asset
+        user_info betsy = std::make_tuple("betsy", "betsy@123.com", 18, 1000000);
+        
+        const auto betsy_name = std::get<0>(betsy);  // wield！ magic number
+
+        enum UserInfo{name, email, age, asset};
+        const auto betsy_email = std::get<email>(betsy);  // Make sense! 利用枚举可以隐式转换的特性
+
+        enum class UserInfoV2{name, email, age, asset};
+        //如果担心命名空间污染，可以使用scoped enum, 不过代码看起来很冗余
+        const auto betsy_age = std::get<static_cast<std::size_t>(UserInfoV2::age)>(betsy);
+
+        // 我们可以定义一个函数，传入枚举名，返回对应的底层类型的值
+        const auto betsy_asset = std::get<user_info_type_c14(UserInfoV2::asset)>(betsy);
+        std::cout << betsy_name << " " << betsy_email << " " << betsy_age << " " << betsy_asset << '\n';
     }
     return 0;
 }
