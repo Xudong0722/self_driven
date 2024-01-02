@@ -1,6 +1,7 @@
 #include <iostream>
 #include <type_traits>
 #include <vector>
+#include <list>
 
 namespace elvis{
     //typename 用于告诉编译器此标识符是一个类型
@@ -59,6 +60,20 @@ public:
     }
 };
 
+class Widget{
+};
+
+template<typename T>                            //MyAllocList<T>是
+using MyAllocList = std::list<T, MyAlloc<T>>;   //std::list<T, MyAlloc<T>>
+                                                //的同义词
+
+MyAllocList<Widget> lw;
+
+template<typename T> 
+class MyAllocList{
+    typedef std::list<T, MyAlloc<T>> type;
+};
+
 int main()
 {
     {
@@ -70,6 +85,7 @@ int main()
         FloatNum y{0.3f};
     }
 
+    
     {
         int x{101};
         int& rx = x;
