@@ -83,7 +83,6 @@ Item11.cpp:30:10: note: declared here
      void private_no_definition_func_v2() = delete;
 ```
 
-
 ## 其他的原因
 
 1. 通常，deleted函数被声明为public而不是private。这也是有原因的。当客户端代码试图调用成员函数，C++会在检查deleted状态前检查它的访问性。当客户端代码调用一个私有的deleted函数，一些编译器只会给出该函数是private的错误（译注：而没有诸如该函数被deleted修饰的错误），即使函数的访问性不影响它是否能被使用。所以值得牢记，如果要将老代码的“私有且未定义”函数替换为deleted函数时请一并修改它的访问性为public，这样可以让编译器产生更好的错误信息。
