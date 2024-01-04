@@ -60,6 +60,14 @@ int main()
         Test t = CreateTest();  //This function will trigger NRVO
 
         Test t = CreateTestButUseMove(); //This function will prevents NRVO
+
+
+        //关于什么情况下应该return std::move(x)：
+        //1.x是一个左值，x如果是将亡值的话，是没必要的（RVO）
+        //2.确保x之后不会再被使用！
+        //3.x不应该是一个局部对象，Since C++11, return x (or return (x) or return ((x)) for that matter) will try to use the move constructor if x is a local variable or a function parameter.
+        //现代C++编译器会有限考虑移动而非拷贝，并且尽可能消除副本，原地构造
+        //https://artificial-mind.net/blog/2021/10/23/return-moves
     }
     return 0;
 }
