@@ -71,7 +71,7 @@ MyAllocList<Widget> lw;
 
 template<typename T> 
 class MyAllocList{
-    typedef std::list<T, MyAlloc<T>> type;
+    // typedef std::list<T, MyAlloc<T>> type;
 };
 
 int main()
