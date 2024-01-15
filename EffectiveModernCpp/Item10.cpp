@@ -14,6 +14,14 @@ constexpr auto user_info_type_c14(E enumerator) noexcept{
     return static_cast<std::underlying_type_t<E>>(enumerator);
 }
 
+enum same_value :int64_t{
+    a = 1,
+    b = 1 << 1,
+    c = 1 << 2,
+    d = 1 << 1,   //Note: 枚举名不能重复，但是枚举值可以重复
+    e = 1 << 2,
+};
+
 int main()
 {
     //Item9: 尽量使用scoped enum
