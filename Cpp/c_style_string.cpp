@@ -28,5 +28,17 @@ int main()
         std::cout << "d != 123456789\n";
     }
 
+    char* ccc = new char[strlen(a)+1];
+    strcpy(ccc, a);
+    ccc[4] = '1';
+    std::cout << ccc << '\n';
+    std::cout << strlen(ccc) << '\n';
+    std::string cccc{ccc};
+    std::cout << cccc << " " << cccc.size() << " " << cccc.length() << " " << cccc.capacity() << '\n';
+    if(cccc == "1234"){
+        std::cout << "cccc == 1234\n";
+    }else{
+        std::cout << "cccc != 1234\n";
+    }
     return 0;
 }
