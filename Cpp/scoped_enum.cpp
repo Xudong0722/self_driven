@@ -28,10 +28,20 @@ void print(machine_status status){
     }
 }
 
+enum print_which{
+    first = 999,
+    three = 3,
+    two = 2,
+    zero = 0,
+};
+
 int main()
 {
     int x = 6;
     auto machine_x = static_cast<machine_status>(x);
     print(machine_x);
+
+    print_which a;
+    std::cout << "print which? " << a << '\n';  //0
     return 0;
 }
