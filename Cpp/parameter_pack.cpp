@@ -7,7 +7,14 @@ template<int... args>
 struct Array{
     static const int size = sizeof...(args);
     int array[size] = {args...};
+    void outputArray(){
+        std::cout << size << '\n';
+        for(int x : array){
+            std::cout << x << '\n';
+        }
+    }
 };
+
 int main()
 {
     //Tuple 
@@ -18,8 +25,6 @@ int main()
 
     //Array
     Array<1,2,3,4> a;
-    for(int i = 0; i<a.size; ++i){
-        std::cout << a.arrar[i] << ' ';
-    }
+    a.outputArray();
     return 0;
 }
