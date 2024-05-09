@@ -1,4 +1,5 @@
 /*
+    ref: https://cntransgroup.github.io/EffectiveModernCppChinese/1.DeducingTypes/item1.html
     Item1: 理解模板类型推导
 */
 
