@@ -75,7 +75,6 @@ int main()
     std::cout << b.use_count() << std::endl;
     vec.clear();
     std::cout << b.use_count() << std::endl;
-    b.reset();
     c.print();
     return 0;
 }
