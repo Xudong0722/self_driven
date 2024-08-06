@@ -57,7 +57,7 @@ int main()
     LOG(vec_cap);
     //LOG(vec_size);
 
-    constexpr int append_count = 100000;
+    constexpr int append_count = 100;
     for(int i = 0; i < append_count; ++i){
         vec.push_back(i);
         int new_vec_cap = vec.capacity();
@@ -65,6 +65,7 @@ int main()
 
         if(new_vec_cap != vec_cap){
             LOG(new_vec_cap);
+            LOG(&vec[0]);
         }
         // if(new_vec_size != vec_size){
         //     LOG(new_vec_size);
