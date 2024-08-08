@@ -51,6 +51,8 @@ static int cnt = 0;
 
 int main()
 {
+    int a{0};
+    std::cout << "a = " << a << " " << &a << std::endl;
     std::vector<int> vec(1,0);
 
     int vec_cap = vec.capacity(), vec_size = vec.size();
@@ -66,6 +68,10 @@ int main()
         if(new_vec_cap != vec_cap){
             LOG(new_vec_cap);
             LOG(&vec[0]);
+            for(int i = 0; i < vec.size(); i++){
+                std::cout << &vec[i] << " ";
+            }
+            std::cout << std::endl;
         }
         // if(new_vec_size != vec_size){
         //     LOG(new_vec_size);
@@ -74,5 +80,7 @@ int main()
         vec_size = new_vec_size;
     }
 
+    int b{1};
+    std::cout << "b = " << b << " " << &b << std::endl;
     return 0;
 }
