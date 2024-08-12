@@ -40,9 +40,24 @@ Test CreateTestDataWithRVO(){
     return Test{101};
 }
 
+Test CreateTestDateWithCondition(bool condition){
+    Test test1{100};
+    Test test2{101};
+    return condition ? test1 : test2;
+}
+
+Test CreateTestDateWithConditionNRVO(bool condition){
+    Test test1{100};
+    Test test2{101};
+    
+    if(condition){
+        return test1;
+    }
+    return test2;
+}
+
 int main()
 {
-    Test test_nrvo = CreateTestDataWithNRVO(true);
     std::cout << "[CreateTestDataWithNRVO] begin\n";
     Test test_nrvo_ = CreateTestDataWithNRVO(true);
     std::cout << "[CreateTestDataWithNRVO] end\n";
@@ -51,5 +66,8 @@ int main()
     Test test_rvo = CreateTestDataWithRVO();
     std::cout << "[CreateTestDataWithRVO] end\n";
 
+    Test test_non_return_obj = CreateTestDateWithCondition(false);
+
+    Test test_non_return_obj_nrvo = CreateTestDateWithConditionNRVO(false);
     return 0;
 }
