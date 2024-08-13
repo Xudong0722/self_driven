@@ -15,9 +15,16 @@ class BasePri{
     int c;
 };
 
+BasePub c;
+
 int main()
 {
     BasePub a;
     BasePri b;
+
+    std::cout << &a << " " << &a.a << " " << &a.b << std::endl;
+    std::cout << &b << std::endl;
+    std::cout << &c << " " << &c.a << " " << &c.b << std::endl;
+    
     return 0;
 }
