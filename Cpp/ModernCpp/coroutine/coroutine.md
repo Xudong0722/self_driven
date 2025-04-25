@@ -11,6 +11,9 @@ They have been described as "functions whose execution you can pause".
 Melvin Conway coined the term coroutine in 1958 when he applied it to the construction of an assembly program. The first published explanation of the coroutine appeared later, in 1963.
 ```
 
+左边是函数调用的流程， 右边是协程调用流
+![alt text](image-1.png)
+
 # 示例
 
 ```c++
@@ -848,20 +851,28 @@ c++预定义了两个awaitable object，分别是suspend_always和suspend_never�
 struct Task {
         class promise_type {
         public:
-                Task get_return_object() { return {};}
-                std::suspend_never initial_suspend() { return {};}
-                std::suspend_never final_suspend() noexcept { return {};}
-                void unhandled_exception() {}
+                Task get_return_object() { return {};}    //协程开始执行之前，会执行此函数，构造一个返回值
+                std::suspend_never initial_suspend() { return {};}   //协程开始执行后，会先执行此函数，这里可以控制协程是否挂起
+                std::suspend_never final_suspend() noexcept { return {};}  //协程结束执行时，会执行此函数，可以控制协程是否挂起，标准要求该函数必须是noexcept
+                void unhandled_exception() {}   //处理协程中的异常行为
                 void return_void() {}
+                std::suspend_always yield_value(T xxx) { /*...*/ return {}}   //co_yield 要求实现此方法，并将返回值传递给co_await
+
+                
         };
 };
 ```
+
 返回值的类型中需要定义一个promise_type，前面提到这些函数会在什么时候执行，所以我们可以通过自定义这些函数的行为来完全控制协程的行为，
-c++赋予了程序员对代码最大限度的自由度
+我们可以借助自定义这些函数来控制协程的行为。
+
 co_yield
+如果协程需要多次返回数据，就需要用到co_yield
+它要求promise_type 实现yield_value() 方法，该方法要求返回值必须是awaitable object，执行后将该对象传递给co_await
 
-co_return
-
+co_return 
+它要求promise_type 实现 return_value() 方法，如果co_return不带任何参数，将会调用return_void()方法。
+该方法执行完之后将会执行final_suspend, 最后销毁协程。
 # 应用
 
 # 参考
@@ -872,3 +883,4 @@ https://zplutor.github.io/2022/03/25/cpp-coroutine-beginner/
 https://www.bennyhuo.com/book/cpp-coroutines/02-generator.html#%E9%97%AE%E9%A2%98-1-%E6%97%A0%E6%B3%95%E7%A1%AE%E5%AE%9A%E6%98%AF%E5%90%A6%E5%AD%98%E5%9C%A8%E4%B8%8B%E4%B8%80%E4%B8%AA%E5%85%83%E7%B4%A0
 https://zhuanlan.zhihu.com/p/497224333
 https://lewissbaker.github.io/2017/11/17/understanding-operator-co-await
+https://lewissbaker.github.io/2017/09/25/coroutine-theory
