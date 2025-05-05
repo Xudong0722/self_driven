@@ -14,178 +14,71 @@ Melvin Conway coined the term coroutine in 1958 when he applied it to the constr
 左边是函数调用的流程， 右边是协程调用流
 ![alt text](image-1.png)
 
+
+为什么要有协程？
+作用于惰性计算的无限序列上的算法？
+todo，这里最后要举两个例子
+
 # 示例
 
+我们来看一个简单的协程：
 ```c++
-#include <coroutine>
 #include <iostream>
-#include <functional>
-#include <chrono>
-#include <unistd.h>
-#include <thread>
-
-class IntReader {
-public:
-        bool await_ready() {
-                return false;
-        }
-
-        void await_suspend(std::coroutine_handle<> handle) {
-                std::thread thread([this, handle]() {
-                                        sleep(3);
-                                        value_ = 101;
-
-                                        handle.resume();
-                                });
-                thread.detach();
-        }
-
-        int await_resume() {
-                return value_;
-        }
-
-private:
-        int value_{0};
-
-};
+#include <coroutine>
 
 struct Task {
-        class promise_type {
-        public:
-                Task get_return_object() { return {};}
-                std::suspend_never initial_suspend() { return {};}
-                std::suspend_never final_suspend() noexcept { return {};}
-                void unhandled_exception() {}
-                void return_void() {}
-        };
+    class promise_type{
+    public:
+        Task get_return_object() {
+            return Task{ std::coroutine_handle<promise_type>::from_promise(*this)};
+        }
+        std::suspend_never initial_suspend() { return {}; }
+        std::suspend_never final_suspend() noexcept { return {}; }
+        void unhandled_exception() {}
+        //void return_void() {}
+    };
+public:
+    Task(std::coroutine_handle<promise_type> handle) : coroutine_handle_(handle) {}
+
+    void resume() {
+        coroutine_handle_.resume();
+    }
+
+private:
+    std::coroutine_handle<promise_type> coroutine_handle_;
 };
 
-Task func() {
-        IntReader reader1;
-        int total = co_await reader1;
-        std::cout << "after resume from reader1, current thread id: " << std::this_thread::get_id()<< '\n';
-        IntReader reader2;
-        total += co_await reader2;
-        std::cout << "after resume from reader2, current thread id: " << std::this_thread::get_id()<< '\n';
-        IntReader reader3;
-        total += co_await reader3;
-        std::cout << "after resume from reader3, current thread id: " << std::this_thread::get_id()<< '\n';
-        std::cout << total << std::endl;
+Task hello_coroutine(int n) {
+    std::cout << "hello ";
+    co_await std::suspend_always{};
+    std::cout << " coroutine " << std::hex << n << '\n';
 }
-int main()
-{
-        func();
 
-        for(int i = 0; i < 15; ++i) {
-                std::cout <<"current thread id: " << std::this_thread::get_id() <<" this is " << i << " second.\n";
-                sleep(1);
-        }
-        return 0;
+int main() {
+
+    int n{0x3f};
+    auto task = hello_coroutine(n);
+    std::cout << "---------";
+    task.resume();
+    return 0;
 }
 ```
 
-```c++
-#include <coroutine>
-#include <iostream>
-#include <functional>
-#include <chrono>
-#include <unistd.h>
-#include <thread>
-
-class IntReader {
-public:
-        bool await_ready() {
-                return false;
-        }
-
-        void await_suspend(std::coroutine_handle<> handle) {
-                std::thread thread([this, handle]() {
-                                        static int seed = 0;
-                                        value_ = ++ seed;
-
-                                        handle.resume();
-                                });
-                thread.detach();
-        }
-
-        int await_resume() {
-                return value_;
-        }
-
-private:
-        int value_{0};
-
-};
-
-struct Task {
-        class promise_type {
-        public:
-                Task get_return_object() {
-                        return Task{ std::coroutine_handle<promise_type>::from_promise(*this) };
-                }
-
-                std::suspend_always yield_value(int val) {
-                        value_ = val;
-                        return {};
-                }
-                std::suspend_never initial_suspend() { return {};}
-                std::suspend_never final_suspend() noexcept { return {};}
-                void unhandled_exception() {}
-                void return_void() {}
-
-                int get_val() const {
-                        return value_;
-                }
-        private:
-                int value_{};
-        };
-
-public:
-        Task(std::coroutine_handle<promise_type> handle) : coroutine_handle_(handle) {}
-        int get_val() const {
-                return coroutine_handle_.promise().get_val();
-        }
-
-        void Next() {
-                coroutine_handle_.resume();
-        }
-private:
-        std::coroutine_handle<promise_type> coroutine_handle_;
-};
-
-Task GetInt() {
-        while(true) {
-                IntReader reader;
-                int value = co_await reader;
-                co_yield value;
-        }
-}
-
-Task func() {
-        IntReader reader1;
-        int total = co_await reader1;
-        std::cout << "after resume from reader1, current thread id: " << std::this_thread::get_id()<< '\n';
-        IntReader reader2;
-        total += co_await reader2;
-        std::cout << "after resume from reader2, current thread id: " << std::this_thread::get_id()<< '\n';
-        IntReader reader3;
-        total += co_await reader3;
-        std::cout << "after resume from reader3, current thread id: " << std::this_thread::get_id()<< '\n';
-        std::cout << total << std::endl;
-}
-int main()
-{
-        auto task = GetInt();
-        std::string line;
-        while(std::cin >> line) {
-                std::cout << task.get_val() << std::endl;
-                task.Next();
-        }
-        return 0;
-}
+程序的运行结果是：
 ```
+hello --------- coroutine 3f
+```
+
+我们发现，打印完hello之后，程序没有继续打印后面的字符串，而是回到了main函数（协程调用方）中，在执行task.resume()之后又回到协程函数中继续执行，到此为止，我们可能会产生这些疑惑？
+- 1.为什么hello_coroutine没有顺序执行？
+- 2.如何跳转回调用方的？
+- 3.Task中的promise_type是什么？为什么要定义那些函数？
+- 4.co_await 关键字是什么？
+- ...
+
+
 创建协程的流程：
-- 创建一个协程帧
+- 创建一个协程帧-coroutine frame
 - 在协程帧里面构建promise对象
 - 把协程的参数拷贝到协程帧里
 - 调用promise.get_return_object() 返回一个对象
@@ -268,7 +161,7 @@ int main() {
 但这种方式的协程缺点比较明显：
 如果申请的内存太大，可能会浪费资源，同时也限制了协程的数量。
 如果申请的内存太小，可能会有栈溢出的风险。
-同时高频的有栈协程切换会破环CPU的栈缓冲区预测的优化，性能上限不如无栈协程
+同时高频的有栈协程切换会破环CPU的栈缓冲区预测的优化，性能上限不如无栈协程。
 
 # 无栈协程
 
@@ -875,6 +768,179 @@ co_return
 该方法执行完之后将会执行final_suspend, 最后销毁协程。
 # 应用
 
+
+
+# 示例代码
+
+```c++
+#include <coroutine>
+#include <iostream>
+#include <functional>
+#include <chrono>
+#include <unistd.h>
+#include <thread>
+
+class IntReader {
+public:
+        bool await_ready() {
+                return false;
+        }
+
+        void await_suspend(std::coroutine_handle<> handle) {
+                std::thread thread([this, handle]() {
+                                        sleep(3);
+                                        value_ = 101;
+
+                                        handle.resume();
+                                });
+                thread.detach();
+        }
+
+        int await_resume() {
+                return value_;
+        }
+
+private:
+        int value_{0};
+
+};
+
+struct Task {
+        class promise_type {
+        public:
+                Task get_return_object() { return {};}
+                std::suspend_never initial_suspend() { return {};}
+                std::suspend_never final_suspend() noexcept { return {};}
+                void unhandled_exception() {}
+                void return_void() {}
+        };
+};
+
+Task func() {
+        IntReader reader1;
+        int total = co_await reader1;
+        std::cout << "after resume from reader1, current thread id: " << std::this_thread::get_id()<< '\n';
+        IntReader reader2;
+        total += co_await reader2;
+        std::cout << "after resume from reader2, current thread id: " << std::this_thread::get_id()<< '\n';
+        IntReader reader3;
+        total += co_await reader3;
+        std::cout << "after resume from reader3, current thread id: " << std::this_thread::get_id()<< '\n';
+        std::cout << total << std::endl;
+}
+
+int main()
+{
+        func();
+
+        for(int i = 0; i < 15; ++i) {
+                std::cout <<"current thread id: " << std::this_thread::get_id() <<" this is " << i << " second.\n";
+                sleep(1);
+        }
+        return 0;
+}
+```
+
+```c++
+#include <coroutine>
+#include <iostream>
+#include <functional>
+#include <chrono>
+#include <unistd.h>
+#include <thread>
+
+class IntReader {
+public:
+        bool await_ready() {
+                return false;
+        }
+
+        void await_suspend(std::coroutine_handle<> handle) {
+                std::thread thread([this, handle]() {
+                                        static int seed = 0;
+                                        value_ = ++ seed;
+
+                                        handle.resume();
+                                });
+                thread.detach();
+        }
+
+        int await_resume() {
+                return value_;
+        }
+
+private:
+        int value_{0};
+
+};
+
+struct Task {
+        class promise_type {
+        public:
+                Task get_return_object() {
+                        return Task{ std::coroutine_handle<promise_type>::from_promise(*this) };
+                }
+
+                std::suspend_always yield_value(int val) {
+                        value_ = val;
+                        return {};
+                }
+                std::suspend_never initial_suspend() { return {};}
+                std::suspend_never final_suspend() noexcept { return {};}
+                void unhandled_exception() {}
+                void return_void() {}
+
+                int get_val() const {
+                        return value_;
+                }
+        private:
+                int value_{};
+        };
+
+public:
+        Task(std::coroutine_handle<promise_type> handle) : coroutine_handle_(handle) {}
+        int get_val() const {
+                return coroutine_handle_.promise().get_val();
+        }
+
+        void Next() {
+                coroutine_handle_.resume();
+        }
+private:
+        std::coroutine_handle<promise_type> coroutine_handle_;
+};
+
+Task GetInt() {
+        while(true) {
+                IntReader reader;
+                int value = co_await reader;
+                co_yield value;
+        }
+}
+
+Task func() {
+        IntReader reader1;
+        int total = co_await reader1;
+        std::cout << "after resume from reader1, current thread id: " << std::this_thread::get_id()<< '\n';
+        IntReader reader2;
+        total += co_await reader2;
+        std::cout << "after resume from reader2, current thread id: " << std::this_thread::get_id()<< '\n';
+        IntReader reader3;
+        total += co_await reader3;
+        std::cout << "after resume from reader3, current thread id: " << std::this_thread::get_id()<< '\n';
+        std::cout << total << std::endl;
+}
+int main()
+{
+        auto task = GetInt();
+        std::string line;
+        while(std::cin >> line) {
+                std::cout << task.get_val() << std::endl;
+                task.Next();
+        }
+        return 0;
+}
+```
 # 参考
 
 https://www.xinfinite.net/t/topic/3518 
