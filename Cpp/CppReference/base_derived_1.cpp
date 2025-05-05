@@ -1,5 +1,5 @@
 #include <iostream>
-
+#include <string>
 using namespace std;
 
 class Base{
@@ -17,6 +17,25 @@ public:
     virtual bool func(){
         cout << "Base::func()\n";
         return false;
+    }
+    virtual bool func2(){
+        cout << "Base::func2()\n";
+        return false;
+    }
+    virtual void test2(){
+        cout << "test2()\n";
+        if(func2()){
+            cout << "func2 return true\n";
+        }else{
+            cout << "func2 return false\n";
+        }
+    }
+
+    int oreturn(){
+        return 1;
+    }
+    void ofunc(){
+        cout <<"Base ofunc" << oreturn() <<"\n";
     }
 private:
     int a{0};
@@ -42,15 +61,25 @@ public:
         cout << "Drive::func()\n";
         return true;
     }
+
+    bool func2(){
+        cout << "Drive::func2()\n";
+        return true;
+    }
+
+    int oreturn(){
+        return 3;
+    }
 private:
     int b{0};
 };
 
 int main()
 {
-    Base* obj = new Drive();
-    obj->test();
+    Drive* obj = new Drive();
+    obj->ofunc();
     cout <<"---------------------------------------\n";
-    obj->Base::test();
+    //obj->Base::test2();
+    std::string a;
     return 0;
 }
