@@ -1,6 +1,3 @@
-=0p
-
-
 # 定义
 
 ```
@@ -77,26 +74,180 @@ hello --------- coroutine 3f
 
 我们带着这些问题继续学习协程。
 协程在实现上主要分成两种：有栈协程和无栈协程。
-所谓的有栈协程就是指运行环境的恢复是通过函数栈的恢复实现的，而无栈协程是通过编译器对代码进行扩展实现的，是一个状态机器。
+所谓的有栈协程就是指运行环境的恢复是通过函数栈的恢复实现的，而无栈协程是通过编译器对代码进行扩展实现的，是一个状态机。
 
 # 有栈协程
 
 我们知道，一般的函数调用是依赖栈的，在调用函数时会创建一个栈帧，在函数执行完成后回收栈帧。
 而有栈协程就是在协程函数执行时申请一块内存，用户自行保存上下文/切换上下文就可以实现协程的切换。
-但这种方式的协程缺点比较明显：
-如果申请的内存太大，可能会浪费资源，同时也限制了协程的数量。
-如果申请的内存太小，可能会有栈溢出的风险。
-同时高频的有栈协程切换会破环CPU的栈缓冲区预测的优化，性能上限不如无栈协程。
+
+我们简单回顾一下调用一个函数时，底层做了什么事情。
+
+```c++
+int func() {
+    return 100;
+}
+
+int main()
+{
+    func();
+    return 0;
+}
+```
+
+x86-64 gcc 13.2 (-m32) 得到的汇编指令如下：
+参考Yang分享的win32汇编分享。
+
+```
+func():
+        pushl   %ebp
+        movl    %esp, %ebp
+        movl    $100, %eax
+        popl    %ebp
+        ret
+main:
+        pushl   %ebp
+        movl    %esp, %ebp
+        call    func()
+        movl    $0, %eax
+        popl    %ebp
+        ret
+```
+
+![call func-1](image-2.png)
+![call func-2](image-3.png)
+
+根据cdecl调用约定：https://en.wikipedia.org/wiki/X86_calling_conventions#Caller-saved_(volatile)_registers
+![cdecl](image-4.png)
+以 x86 平台为例:
+
+1. %ebx-通用寄存器（callee-saved）
+2. %edi-通用寄存器（callee-saved）
+3. %esi-通用寄存器（callee-saved）
+4. %ebp-栈帧基地址指针
+5. %esp-栈顶指针
+6. ret address- 返回地址（即“下一条要执行的指令”）
+
+这些寄存器的组合能让协程在切回来时：
+
+- 找到栈位置（%esp）
+
+- 恢复原函数返回的位置（ret address）
+
+- 恢复原来的局部变量访问基址（%ebp）
+
+- 恢复部分通用寄存器状态（如 %ebx, %esi, %edi）
+
+其他寄存器如 %eax, %ecx, %edx 被认为是 caller-saved，不需要 callee 保存，调用者自己负责备份。
+我们可以通过申请一段内存存放函数运行时的上下文，在恢复的时候将内存中的上下文复制到寄存器中，就可以模拟协程，
+
+stackful_co.c
+```c
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+
+const int CO_SIZE = 1024;
+
+static char** s_main_co = NULL;
+static char** s_func_co = NULL;
+
+extern void swap_context(char **cur_co, char** next_co);
+
+char** init_context(char* func) {
+  char** ctx = (char**) malloc(sizeof(char*) * CO_SIZE);
+  memset(ctx, 0, sizeof(char*) * CO_SIZE);  //用来存放上下文
+
+  *(ctx + CO_SIZE - 1) = (char*)func;   //这里为了方便，第一次调用时，将函数入口地址作为return address
+  *(ctx + CO_SIZE - 6) = (char*)(ctx + CO_SIZE - 7);  //预留6个寄存器，其余作为栈帧
+  return ctx + CO_SIZE;   //栈地址增长方向与堆地址增长方向不同
+}
+
+void func() {
+  char* str = "hi, func.";
+  printf("%s, before yield\n", __FUNCTION__);
+  swap_context(s_func_co, s_main_co);
+  printf("%s, func resume, %s\n",__FUNCTION__,  str);
+  swap_context(s_func_co, s_main_co);
+}
+
+int main()
+{
+  s_main_co = init_context((char*)main);
+  s_func_co = init_context((char*)func);
+
+  char* str = "hi, main.";
+  printf("%s, before call func\n", __FUNCTION__);
+  swap_context(s_main_co, s_func_co);
+  printf( "%s, main resume, %s\n", __FUNCTION__,  str);
+  swap_context(s_main_co, s_func_co);
+
+
+  free(s_main_co - CO_SIZE);
+  free(s_func_co - CO_SIZE);
+  return 0;
+}
+```
+
+swap_context.s
+```c
+  .globl swap_context
+  .type swap_context, @function
+
+swap_context:
+    //不会建立栈帧
+    movl 4(%esp), %eax    //获取第一个参数cur_co, 存放在eax中
+    movl %ebx, -8(%eax)   //将各个寄存器中的值存储到cur_co中
+    movl %edi, -12(%eax)
+    movl %esi, -16(%eax)
+    movl %ebp, -20(%eax)
+    movl %esp, -24(%eax)
+
+    //  %esp  存储的是当前调用栈的顶部所在的地址，
+    // (%esp) 是顶部地址所指向的内存区域存储的值，即返回cur_co的返回地址
+    movl (%esp), %ecx
+    movl %ecx, -4(%eax)
+
+    // 获取 swap_ctx 的第二个参数 char **next_co
+    movl 8(%esp), %eax
+
+    // 依次将 next 存储的值写入各个寄存器，
+    movl  -8(%eax), %ebx
+    movl -12(%eax), %edi
+    movl -16(%eax), %esi
+    movl -20(%eax), %ebp
+    movl -24(%eax), %esp
+
+    movl -4(%eax), %ecx  //前面约定了这个地址存放的是返回地址，所以我们将它赋值给esp指向的内容
+    movl %ecx, (%esp)
+
+    ret
+```
+
+```
+gcc -m32 stackful_co.c swap_context.s -o test
+```
+
+有栈协程缺点比较明显：
+
+- 如果申请的内存太大，可能会浪费内存，同时也限制了协程的数量。
+
+- 如果申请的内存太小，可能会溢出的风险。
+
+- 同时高频的有栈协程切换会破环CPU的栈缓冲区预测的优化，性能上限不如无栈协程。
 
 # 无栈协程
+相较于有栈协程这种朴素的实现方式，c++20的协程是无栈协程，他采用的是状态机的思想，通过编译器生成代码实现协程上下文之间的切换。
 
 创建协程的流程：
+
 - 创建一个协程帧-coroutine frame
 - 在协程帧里面构建promise对象
 - 把协程的参数拷贝到协程帧里
 - 调用promise.get_return_object() 返回一个对象
 
 promise_type中的定制点：
+
 - initial_suspend: 在协程创建后调用， 可以控制是否挂起
 - final_suspend: 
 - return_value: 保存协程返回值
@@ -734,6 +885,7 @@ typeinfo name for std::thread::_State_impl<std::thread::_Invoker<std::tuple<IntR
 
 co_await
 co_await的操作对象必须是一个awaitable object，它需要定义如下几个函数来保证协程的正常执行：
+
 - await_ready() 如果返回true，代表协程已经准备就绪不需要挂起，否则挂起协程。
 - await_suspend() 该函数可以定义协程挂起时的行为，同时，该函数参数为协程句柄，这意味着我们可以在这个函数中那个恢复协程。
 - await_resume() 当协程恢复执行或者协程不需要挂起的时候，就会执行这个函数。
@@ -742,6 +894,7 @@ c++预定义了两个awaitable object，分别是suspend_always和suspend_never�
 前者表示总是挂起，后者表示总是不挂起
 
 介绍另外两个之前，还需要注明下协程的返回值，举个例子：
+
 ```c++
 struct Task {
         class promise_type {
@@ -768,9 +921,8 @@ co_yield
 co_return 
 它要求promise_type 实现 return_value() 方法，如果co_return不带任何参数，将会调用return_void()方法。
 该方法执行完之后将会执行final_suspend, 最后销毁协程。
+
 # 应用
-
-
 
 # 示例代码
 
