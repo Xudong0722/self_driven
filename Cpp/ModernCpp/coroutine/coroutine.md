@@ -238,9 +238,54 @@ gcc -m32 stackful_co.c swap_context.s -o test
 
 - 同时高频的有栈协程切换会破环CPU的栈缓冲区预测的优化，性能上限不如无栈协程。
 
+不过Golang采用的就是有栈协程，在语言层面就原生支持协程-goroutine，他的栈空间可以根据需要扩容或缩减，所有协程统一在运行时由调度器管理，G-M-P模型。
+
 # 无栈协程
 相较于有栈协程这种朴素的实现方式，c++20的协程是无栈协程，他采用的是状态机的思想，通过编译器生成代码实现协程上下文之间的切换。
 
+在c++20中，如果函数中出现了这co_await， co_yield，co_return这三个关键字，该函数就被认为是协程。他们的含义如下：
+
+co_await
+co_await的操作对象必须是一个awaitable object，它需要定义如下几个函数来保证协程的正常执行：
+
+- await_ready() 如果返回true，代表协程已经准备就绪不需要挂起，否则挂起协程。
+- await_suspend() 该函数可以定义协程挂起时的行为，同时，该函数参数为协程句柄，这意味着我们可以在这个函数中那个恢复协程。
+- await_resume() 当协程恢复执行或者协程不需要挂起的时候，就会执行这个函数。
+
+c++预定义了两个awaitable object，分别是suspend_always和suspend_never，他们的区别就是await_ready的返回值不同，
+前者表示总是挂起，后者表示总是不挂起
+
+介绍另外两个之前，还需要注明下协程的返回值，举个例子：
+
+```c++
+struct Task {
+        class promise_type {
+        public:
+                Task get_return_object() { return {};}    //协程开始执行之前，会执行此函数，构造一个返回值
+                std::suspend_never initial_suspend() { return {};}   //协程开始执行后，会先执行此函数，这里可以控制协程是否挂起
+                std::suspend_never final_suspend() noexcept { return {};}  //协程结束执行时，会执行此函数，可以控制协程是否挂起，标准要求该函数必须是noexcept
+                void unhandled_exception() {}   //处理协程中的异常行为
+                void return_void() {}
+                std::suspend_always yield_value(T xxx) { /*...*/ return {}}   //co_yield 要求实现此方法，并将返回值传递给co_await
+
+                
+        };
+};
+```
+
+返回值的类型中需要定义一个promise_type，前面提到这些函数会在什么时候执行，所以我们可以通过自定义这些函数的行为来完全控制协程的行为，
+
+co_yield
+如果协程需要多次返回数据，就需要用到co_yield
+它要求promise_type 实现yield_value() 方法，该方法要求返回值必须是awaitable object，执行后将该对象传递给co_await
+
+co_return 
+它要求promise_type 实现 return_value() 方法，如果co_return不带任何参数，将会调用return_void()方法。
+该方法执行完之后将会执行final_suspend, 最后销毁协程。
+
+
+我们再通过一个例子来学习下协程的创建流程：
+![协程创建](image.png)
 创建协程的流程：
 
 - 创建一个协程帧-coroutine frame
@@ -321,557 +366,422 @@ int main() {
 ```
 
 ```
-IntReader::await_ready():
-        pushq   %rbp
-        movq    %rsp, %rbp
-        movq    %rdi, -8(%rbp)
-        movl    $0, %eax
-        popq    %rbp
-        ret
-IntReader::await_suspend(std::__n4861::coroutine_handle<void>)::'lambda'()::operator()() const:
-        pushq   %rbp
-        movq    %rsp, %rbp
-        subq    $16, %rsp
-        movq    %rdi, -8(%rbp)
-        movl    $3, %edi
-        call    sleep
-        movq    -8(%rbp), %rax
-        movq    (%rax), %rax
-        movl    $101, (%rax)
-        movq    -8(%rbp), %rax
-        addq    $8, %rax
-        movq    %rax, %rdi
-        call    std::__n4861::coroutine_handle<void>::resume() const
-        nop
-        leave
-        ret
-IntReader::await_suspend(std::__n4861::coroutine_handle<void>):
-        pushq   %rbp
-        movq    %rsp, %rbp
-        pushq   %rbx
-        subq    $56, %rsp
-        movq    %rdi, -56(%rbp)
-        movq    %rsi, -64(%rbp)
-        movq    -56(%rbp), %rax
-        movq    %rax, -32(%rbp)
-        movq    -64(%rbp), %rax
-        movq    %rax, -24(%rbp)
-        leaq    -32(%rbp), %rdx
-        leaq    -40(%rbp), %rax
-        movq    %rdx, %rsi
-        movq    %rax, %rdi
-        call    std::thread::thread<IntReader::await_suspend(std::__n4861::coroutine_handle<void>)::'lambda'(), void>(IntReader::await_suspend(std::__n4861::coroutine_handle<void>)::'lambda'()&&)
-        leaq    -40(%rbp), %rax
-        movq    %rax, %rdi
-        call    std::thread::detach()
-        leaq    -40(%rbp), %rax
-        movq    %rax, %rdi
-        call    std::thread::~thread() [complete object destructor]
-        jmp     .L26
-        movq    %rax, %rbx
-        leaq    -40(%rbp), %rax
-        movq    %rax, %rdi
-        call    std::thread::~thread() [complete object destructor]
-        movq    %rbx, %rax
-        movq    %rax, %rdi
-        call    _Unwind_Resume
-.L26:
-        movq    -8(%rbp), %rbx
-        leave
-        ret
-IntReader::await_resume():
-        pushq   %rbp
-        movq    %rsp, %rbp
-        movq    %rdi, -8(%rbp)
-        movq    -8(%rbp), %rax
-        movl    (%rax), %eax
-        popq    %rbp
-        ret
 Task::promise_type::get_return_object():
-        pushq   %rbp
-        movq    %rsp, %rbp
-        movq    %rdi, -8(%rbp)
-        nop
-        popq    %rbp
-        ret
+        push    ebp
+        mov     ebp, esp
+        sub     esp, 24
+        lea     eax, [ebp-12]
+        sub     esp, 8
+        push    DWORD PTR [ebp+12]
+        push    eax
+        call    std::__n4861::coroutine_handle<Task::promise_type>::from_promise(Task::promise_type&)
+        add     esp, 12
+        sub     esp, 8
+        push    DWORD PTR [ebp-12]
+        push    DWORD PTR [ebp+8]
+        call    Task::Task(std::__n4861::coroutine_handle<Task::promise_type>) [complete object constructor]
+        add     esp, 16
+        mov     eax, DWORD PTR [ebp+8]
+        leave
+        ret     4
 Task::promise_type::initial_suspend():
-        pushq   %rbp
-        movq    %rsp, %rbp
-        movq    %rdi, -8(%rbp)
+        push    ebp
+        mov     ebp, esp
         nop
-        popq    %rbp
-        ret
+        mov     eax, DWORD PTR [ebp+8]
+        pop     ebp
+        ret     4
 Task::promise_type::final_suspend():
-        pushq   %rbp
-        movq    %rsp, %rbp
-        movq    %rdi, -8(%rbp)
+        push    ebp
+        mov     ebp, esp
         nop
-        popq    %rbp
-        ret
+        mov     eax, DWORD PTR [ebp+8]
+        pop     ebp
+        ret     4
 Task::promise_type::unhandled_exception():
-        pushq   %rbp
-        movq    %rsp, %rbp
-        movq    %rdi, -8(%rbp)
+        push    ebp
+        mov     ebp, esp
         nop
-        popq    %rbp
+        pop     ebp
         ret
-Task::promise_type::return_void():
-        pushq   %rbp
-        movq    %rsp, %rbp
-        movq    %rdi, -8(%rbp)
+Task::Task(std::__n4861::coroutine_handle<Task::promise_type>) [base object constructor]:
+        push    ebp
+        mov     ebp, esp
+        mov     eax, DWORD PTR [ebp+8]
+        mov     edx, DWORD PTR [ebp+12]
+        mov     DWORD PTR [eax], edx
         nop
-        popq    %rbp
+        pop     ebp
         ret
-func():
-        pushq   %rbp
-        movq    %rsp, %rbp
-        pushq   %rbx
-        subq    $24, %rsp
-        movq    $0, -24(%rbp)
-        movb    $0, -25(%rbp)
-        movb    $0, -26(%rbp)
-        movl    $72, %eax
-        movq    %rax, %rdi
-        call    operator new(unsigned long)
-        movq    %rax, -24(%rbp)
-        movq    -24(%rbp), %rax
-        movb    $1, 34(%rax)
-        movq    -24(%rbp), %rax
-        movq    $func(func()::_Z4funcv.Frame*) (.actor), (%rax)
-        movq    -24(%rbp), %rax
-        movq    $func(func()::_Z4funcv.Frame*) (.destroy), 8(%rax)
-        movq    -24(%rbp), %rax
-        addq    $16, %rax
-        movq    %rax, %rdi
+Task::resume():
+        push    ebp
+        mov     ebp, esp
+        sub     esp, 8
+        mov     eax, DWORD PTR [ebp+8]
+        sub     esp, 12
+        push    eax
+        call    std::__n4861::coroutine_handle<Task::promise_type>::resume() const
+        add     esp, 16
+        nop
+        leave
+        ret
+hello_coroutine(int):
+        push    ebp
+        mov     ebp, esp
+        sub     esp, 24
+        mov     BYTE PTR [ebp-9], 0
+        mov     BYTE PTR [ebp-10], 0
+        mov     eax, 28
+        sub     esp, 12
+        push    eax
+        call    operator new(unsigned int)
+        add     esp, 16
+        mov     DWORD PTR [ebp-16], eax
+        mov     eax, DWORD PTR [ebp-16]
+        mov     BYTE PTR [eax+22], 1
+        mov     eax, DWORD PTR [ebp-16]
+        mov     DWORD PTR [eax], OFFSET FLAT:hello_coroutine(_Z15hello_coroutinei.Frame*) (.actor)
+        mov     eax, DWORD PTR [ebp-16]
+        mov     DWORD PTR [eax+4], OFFSET FLAT:hello_coroutine(_Z15hello_coroutinei.Frame*) (.destroy)
+        mov     edx, DWORD PTR [ebp+12]
+        mov     eax, DWORD PTR [ebp-16]
+        mov     DWORD PTR [eax+16], edx
+        mov     eax, DWORD PTR [ebp-16]
+        mov     WORD PTR [eax+20], 0
+        mov     eax, DWORD PTR [ebp-16]
+        mov     BYTE PTR [eax+23], 0
+        mov     eax, DWORD PTR [ebp-16]
+        lea     edx, [eax+8]
+        mov     eax, DWORD PTR [ebp+8]
+        sub     esp, 8
+        push    edx
+        push    eax
         call    Task::promise_type::get_return_object()
-        movq    -24(%rbp), %rax
-        movw    $0, 32(%rax)
-        movq    -24(%rbp), %rax
-        movq    %rax, %rdi
-        call    func(func()::_Z4funcv.Frame*) (.actor)
-        jmp     .L43
-        movq    %rax, %rdi
-        call    __cxa_begin_catch
-        movq    -24(%rbp), %rax
-        movq    %rax, %rdi
-        call    operator delete(void*)
-        call    __cxa_rethrow
-        movq    %rax, %rbx
-        call    __cxa_end_catch
-        movq    %rbx, %rax
-        movq    %rax, %rdi
-        call    _Unwind_Resume
-.L43:
-        movq    -8(%rbp), %rbx
+        add     esp, 12
+        sub     esp, 12
+        push    DWORD PTR [ebp-16]
+        call    hello_coroutine(_Z15hello_coroutinei.Frame*) (.actor)
+        add     esp, 16
+        mov     eax, DWORD PTR [ebp+8]
         leave
-        ret
-
+        ret     4
 .LC0:
-        .string "after resume from reader1, current thread id: "
+        .string "hello "
 .LC1:
-        .string "after resume from reader2, current thread id: "
-.LC2:
-        .string "after resume from reader3, current thread id: "
-func(func()::_Z4funcv.Frame*) (.actor):
-        pushq   %rbp
-        movq    %rsp, %rbp
-        pushq   %rbx
-        subq    $40, %rsp
-        movq    %rdi, -40(%rbp)
-        movq    -40(%rbp), %rax
-        movzwl  32(%rax), %eax
-        andl    $1, %eax
-        testw   %ax, %ax
+        .string " coroutine "
+hello_coroutine(_Z15hello_coroutinei.Frame*) (.actor):
+        push    ebp
+        mov     ebp, esp
+        push    ebx
+        sub     esp, 36
+        mov     eax, DWORD PTR [ebp+8]
+        movzx   eax, WORD PTR [eax+20]
+        and     eax, 1
+        test    ax, ax
+        je      .L37
+        mov     eax, DWORD PTR [ebp+8]
+        movzx   eax, WORD PTR [eax+20]
+        movzx   eax, ax
+        cmp     eax, 7
+        je      .L46
+        cmp     eax, 7
+        jg      .L47
+        cmp     eax, 5
         je      .L45
-        movq    -40(%rbp), %rax
-        movzwl  32(%rax), %eax
-        movzwl  %ax, %eax
-        cmpl    $11, %eax
-        ja      .L46
-        movl    %eax, %eax
-        movq    .L48(,%rax,8), %rax
-        jmp     *%rax
-.L48:
-        .quad   .L46
-        .quad   .L84
-        .quad   .L46
-        .quad   .L55
-        .quad   .L46
-        .quad   .L56
-        .quad   .L46
-        .quad   .L57
-        .quad   .L46
-        .quad   .L58
-        .quad   .L46
-        .quad   .L59
-.L46:
-        ud2
-.L45:
-        movq    -40(%rbp), %rax
-        movzwl  32(%rax), %eax
-        movzwl  %ax, %eax
-        cmpl    $10, %eax
-        ja      .L60
-        movl    %eax, %eax
-        movq    .L62(,%rax,8), %rax
-        jmp     *%rax
-.L62:
-        .quad   .L67
-        .quad   .L60
-        .quad   .L69
-        .quad   .L60
-        .quad   .L70
-        .quad   .L60
-        .quad   .L71
-        .quad   .L60
-        .quad   .L72
-        .quad   .L60
-        .quad   .L73
-.L67:
-        movq    -40(%rbp), %rbx
-        movq    -40(%rbp), %rax
-        movq    %rax, %rdi
+        cmp     eax, 5
+        jg      .L47
+        cmp     eax, 1
+        je      .L68
+        cmp     eax, 3
+        je      .L44
+        jmp     .L47
+.L37:
+        mov     eax, DWORD PTR [ebp+8]
+        movzx   eax, WORD PTR [eax+20]
+        movzx   eax, ax
+        cmp     eax, 6
+        je      .L56
+        cmp     eax, 6
+        jg      .L47
+        cmp     eax, 4
+        je      .L55
+        cmp     eax, 4
+        jg      .L47
+        test    eax, eax
+        je      .L51
+        cmp     eax, 2
+        je      .L54
+        jmp     .L47
+.L51:
+        mov     eax, DWORD PTR [ebp+8]
+        add     eax, 12
+        sub     esp, 8
+        push    DWORD PTR [ebp+8]
+        push    eax
         call    std::__n4861::coroutine_handle<Task::promise_type>::from_address(void*)
-        movq    %rax, 24(%rbx)
-        movq    -40(%rbp), %rax
-        movb    $0, 35(%rax)
-        movq    -40(%rbp), %rax
-        addq    $16, %rax
-        movq    %rax, %rdi
+        add     esp, 12
+        mov     eax, DWORD PTR [ebp+8]
+        mov     BYTE PTR [eax+23], 0
+        mov     eax, DWORD PTR [ebp+8]
+        lea     edx, [eax+8]
+        lea     eax, [ebp-25]
+        sub     esp, 8
+        push    edx
+        push    eax
         call    Task::promise_type::initial_suspend()
-        movq    -40(%rbp), %rax
-        addq    $36, %rax
-        movq    %rax, %rdi
+        add     esp, 12
+        mov     eax, DWORD PTR [ebp+8]
+        mov     WORD PTR [eax+20], 2
+        mov     eax, DWORD PTR [ebp+8]
+        add     eax, 24
+        sub     esp, 12
+        push    eax
         call    std::__n4861::suspend_never::await_ready() const
-        xorl    $1, %eax
-        testb   %al, %al
-        jne     .L68
-        jmp     .L69
-.L60:
+        add     esp, 16
+        xor     eax, 1
+        test    al, al
+        jne     .L53
+        jmp     .L54
+.L47:
         ud2
-.L68:
-        movq    -40(%rbp), %rax
-        movw    $2, 32(%rax)
-        movq    -40(%rbp), %rax
-        leaq    36(%rax), %rbx
-        movq    -40(%rbp), %rax
-        addq    $24, %rax
-        movq    %rax, %rdi
+.L53:
+        mov     eax, DWORD PTR [ebp+8]
+        lea     ebx, [eax+24]
+        mov     eax, DWORD PTR [ebp+8]
+        lea     edx, [eax+12]
+        lea     eax, [ebp-20]
+        sub     esp, 8
+        push    edx
+        push    eax
         call    std::__n4861::coroutine_handle<Task::promise_type>::operator std::__n4861::coroutine_handle<void>() const
-        movq    %rax, %rsi
-        movq    %rbx, %rdi
+        add     esp, 12
+        sub     esp, 8
+        push    DWORD PTR [ebp-20]
+        push    ebx
         call    std::__n4861::suspend_never::await_suspend(std::__n4861::coroutine_handle<void>) const
-        jmp     .L74
-.L55:
-        jmp     .L54
-.L69:
-        movq    -40(%rbp), %rax
-        movb    $1, 35(%rax)
-        movq    -40(%rbp), %rax
-        addq    $36, %rax
-        movq    %rax, %rdi
-        call    std::__n4861::suspend_never::await_resume() const
-        movq    -40(%rbp), %rax
-        movl    $0, 40(%rax)
-        movq    -40(%rbp), %rax
-        addq    $40, %rax
-        movq    %rax, %rdi
-        call    IntReader::await_ready()
-        xorl    $1, %eax
-        testb   %al, %al
-        je      .L70
-        movq    -40(%rbp), %rax
-        movw    $4, 32(%rax)
-        movq    -40(%rbp), %rax
-        leaq    40(%rax), %rbx
-        movq    -40(%rbp), %rax
-        addq    $24, %rax
-        movq    %rax, %rdi
-        call    std::__n4861::coroutine_handle<Task::promise_type>::operator std::__n4861::coroutine_handle<void>() const
-        movq    %rax, %rsi
-        movq    %rbx, %rdi
-        call    IntReader::await_suspend(std::__n4861::coroutine_handle<void>)
-        jmp     .L74
-.L56:
-        jmp     .L54
-.L70:
-        movq    -40(%rbp), %rax
-        addq    $40, %rax
-        movq    %rax, %rdi
-        call    IntReader::await_resume()
-        movq    -40(%rbp), %rdx
-        movl    %eax, 44(%rdx)
-        movl    $.LC0, %esi
-        movl    $_ZSt4cout, %edi
-        call    std::basic_ostream<char, std::char_traits<char>>& std::operator<<<std::char_traits<char>>(std::basic_ostream<char, std::char_traits<char>>&, char const*)
-        movq    %rax, %rbx
-        call    std::this_thread::get_id()
-        movq    %rax, %rsi
-        movq    %rbx, %rdi
-        call    std::basic_ostream<char, std::char_traits<char>>& std::operator<<<char, std::char_traits<char>>(std::basic_ostream<char, std::char_traits<char>>&, std::thread::id)
-        movl    $10, %esi
-        movq    %rax, %rdi
-        call    std::basic_ostream<char, std::char_traits<char>>& std::operator<<<std::char_traits<char>>(std::basic_ostream<char, std::char_traits<char>>&, char)
-        movq    -40(%rbp), %rax
-        movl    $0, 48(%rax)
-        movq    -40(%rbp), %rax
-        addq    $48, %rax
-        movq    %rax, %rdi
-        call    IntReader::await_ready()
-        xorl    $1, %eax
-        testb   %al, %al
-        je      .L71
-        movq    -40(%rbp), %rax
-        movw    $6, 32(%rax)
-        movq    -40(%rbp), %rax
-        leaq    48(%rax), %rbx
-        movq    -40(%rbp), %rax
-        addq    $24, %rax
-        movq    %rax, %rdi
-        call    std::__n4861::coroutine_handle<Task::promise_type>::operator std::__n4861::coroutine_handle<void>() const
-        movq    %rax, %rsi
-        movq    %rbx, %rdi
-        call    IntReader::await_suspend(std::__n4861::coroutine_handle<void>)
-        jmp     .L74
-.L57:
-        jmp     .L54
-.L71:
-        movq    -40(%rbp), %rax
-        addq    $48, %rax
-        movq    %rax, %rdi
-        call    IntReader::await_resume()
-        movq    -40(%rbp), %rdx
-        movl    %eax, 56(%rdx)
-        movq    -40(%rbp), %rax
-        movl    44(%rax), %edx
-        movq    -40(%rbp), %rax
-        movl    56(%rax), %eax
-        addl    %eax, %edx
-        movq    -40(%rbp), %rax
-        movl    %edx, 44(%rax)
-        movl    $.LC1, %esi
-        movl    $_ZSt4cout, %edi
-        call    std::basic_ostream<char, std::char_traits<char>>& std::operator<<<std::char_traits<char>>(std::basic_ostream<char, std::char_traits<char>>&, char const*)
-        movq    %rax, %rbx
-        call    std::this_thread::get_id()
-        movq    %rax, %rsi
-        movq    %rbx, %rdi
-        call    std::basic_ostream<char, std::char_traits<char>>& std::operator<<<char, std::char_traits<char>>(std::basic_ostream<char, std::char_traits<char>>&, std::thread::id)
-        movl    $10, %esi
-        movq    %rax, %rdi
-        call    std::basic_ostream<char, std::char_traits<char>>& std::operator<<<std::char_traits<char>>(std::basic_ostream<char, std::char_traits<char>>&, char)
-        movq    -40(%rbp), %rax
-        movl    $0, 52(%rax)
-        movq    -40(%rbp), %rax
-        addq    $52, %rax
-        movq    %rax, %rdi
-        call    IntReader::await_ready()
-        xorl    $1, %eax
-        testb   %al, %al
-        je      .L72
-        movq    -40(%rbp), %rax
-        movw    $8, 32(%rax)
-        movq    -40(%rbp), %rax
-        leaq    52(%rax), %rbx
-        movq    -40(%rbp), %rax
-        addq    $24, %rax
-        movq    %rax, %rdi
-        call    std::__n4861::coroutine_handle<Task::promise_type>::operator std::__n4861::coroutine_handle<void>() const
-        movq    %rax, %rsi
-        movq    %rbx, %rdi
-        call    IntReader::await_suspend(std::__n4861::coroutine_handle<void>)
-        jmp     .L74
-.L58:
-        jmp     .L54
-.L72:
-        movq    -40(%rbp), %rax
-        addq    $52, %rax
-        movq    %rax, %rdi
-        call    IntReader::await_resume()
-        movq    -40(%rbp), %rdx
-        movl    %eax, 60(%rdx)
-        movq    -40(%rbp), %rax
-        movl    44(%rax), %edx
-        movq    -40(%rbp), %rax
-        movl    60(%rax), %eax
-        addl    %eax, %edx
-        movq    -40(%rbp), %rax
-        movl    %edx, 44(%rax)
-        movl    $.LC2, %esi
-        movl    $_ZSt4cout, %edi
-        call    std::basic_ostream<char, std::char_traits<char>>& std::operator<<<std::char_traits<char>>(std::basic_ostream<char, std::char_traits<char>>&, char const*)
-        movq    %rax, %rbx
-        call    std::this_thread::get_id()
-        movq    %rax, %rsi
-        movq    %rbx, %rdi
-        call    std::basic_ostream<char, std::char_traits<char>>& std::operator<<<char, std::char_traits<char>>(std::basic_ostream<char, std::char_traits<char>>&, std::thread::id)
-        movl    $10, %esi
-        movq    %rax, %rdi
-        call    std::basic_ostream<char, std::char_traits<char>>& std::operator<<<std::char_traits<char>>(std::basic_ostream<char, std::char_traits<char>>&, char)
-        movq    -40(%rbp), %rax
-        movl    44(%rax), %eax
-        movl    %eax, %esi
-        movl    $_ZSt4cout, %edi
-        call    std::ostream::operator<<(int)
-        movl    $_ZSt4endlIcSt11char_traitsIcEERSt13basic_ostreamIT_T0_ES6_, %esi
-        movq    %rax, %rdi
-        call    std::ostream::operator<<(std::ostream& (*)(std::ostream&))
-        movq    -40(%rbp), %rax
-        addq    $16, %rax
-        movq    %rax, %rdi
-        call    Task::promise_type::return_void()
-.L80:
-        movq    -40(%rbp), %rax
-        movq    $0, (%rax)
-        movq    -40(%rbp), %rax
-        addq    $16, %rax
-        movq    %rax, %rdi
-        call    Task::promise_type::final_suspend()
-        movq    -40(%rbp), %rax
-        addq    $64, %rax
-        movq    %rax, %rdi
-        call    std::__n4861::suspend_never::await_ready() const
-        xorl    $1, %eax
-        testb   %al, %al
-        je      .L73
-        movq    -40(%rbp), %rax
-        movw    $10, 32(%rax)
-        movq    -40(%rbp), %rax
-        leaq    64(%rax), %rbx
-        movq    -40(%rbp), %rax
-        addq    $24, %rax
-        movq    %rax, %rdi
-        call    std::__n4861::coroutine_handle<Task::promise_type>::operator std::__n4861::coroutine_handle<void>() const
-        movq    %rax, %rsi
-        movq    %rbx, %rdi
-        call    std::__n4861::suspend_never::await_suspend(std::__n4861::coroutine_handle<void>) const
-        jmp     .L74
-.L59:
-        jmp     .L54
-.L73:
-        movq    -40(%rbp), %rax
-        addq    $64, %rax
-        movq    %rax, %rdi
-        call    std::__n4861::suspend_never::await_resume() const
-        jmp     .L54
-.L84:
-        nop
+        add     esp, 16
+        jmp     .L57
+.L44:
+        jmp     .L43
 .L54:
-        movq    -40(%rbp), %rax
-        movzbl  34(%rax), %eax
-        movzbl  %al, %eax
-        testl   %eax, %eax
-        je      .L85
-        movq    -40(%rbp), %rax
-        movq    %rax, %rdi
-        call    operator delete(void*)
-        jmp     .L85
-.L74:
-        jmp     .L85
-        movq    %rax, %rdi
-        call    __cxa_begin_catch
-        movq    -40(%rbp), %rax
-        movzbl  35(%rax), %eax
-        xorl    $1, %eax
-        testb   %al, %al
-        je      .L79
-        call    __cxa_rethrow
-.L79:
-        movq    -40(%rbp), %rax
-        movq    $0, (%rax)
-        movq    -40(%rbp), %rax
-        movw    $0, 32(%rax)
-        movq    -40(%rbp), %rax
-        addq    $16, %rax
-        movq    %rax, %rdi
-        call    Task::promise_type::unhandled_exception()
-        call    __cxa_end_catch
-        jmp     .L80
-        movq    %rax, %rbx
-        call    __cxa_end_catch
-        movq    %rbx, %rax
-        movq    %rax, %rdi
-        call    _Unwind_Resume
-.L85:
-        nop
-        movq    -8(%rbp), %rbx
-        leave
-        ret
-
-func(func()::_Z4funcv.Frame*) (.destroy):
-        pushq   %rbp
-        movq    %rsp, %rbp
-        subq    $16, %rsp
-        movq    %rdi, -8(%rbp)
-        movq    -8(%rbp), %rax
-        movzwl  32(%rax), %eax
-        orl     $1, %eax
-        movl    %eax, %edx
-        movq    -8(%rbp), %rax
-        movw    %dx, 32(%rax)
-        movq    -8(%rbp), %rax
-        movq    %rax, %rdi
-        call    func(func()::_Z4funcv.Frame*) (.actor)
-        leave
-        ret
-.LC3:
-        .string "current thread id: "
-.LC4:
-        .string " this is "
-.LC5:
-        .string " second.\n"
-main:
-        pushq   %rbp
-        movq    %rsp, %rbp
-        pushq   %rbx
-        subq    $24, %rsp
-        call    func()
-        movl    $0, -20(%rbp)
-        jmp     .L89
-.L90:
-        movl    $.LC3, %esi
-        movl    $_ZSt4cout, %edi
+        mov     eax, DWORD PTR [ebp+8]
+        mov     BYTE PTR [eax+23], 1
+        mov     eax, DWORD PTR [ebp+8]
+        add     eax, 24
+        sub     esp, 12
+        push    eax
+        call    std::__n4861::suspend_never::await_resume() const
+        add     esp, 16
+        sub     esp, 8
+        push    OFFSET FLAT:.LC0
+        push    OFFSET FLAT:_ZSt4cout
         call    std::basic_ostream<char, std::char_traits<char>>& std::operator<<<std::char_traits<char>>(std::basic_ostream<char, std::char_traits<char>>&, char const*)
-        movq    %rax, %rbx
-        call    std::this_thread::get_id()
-        movq    %rax, %rsi
-        movq    %rbx, %rdi
-        call    std::basic_ostream<char, std::char_traits<char>>& std::operator<<<char, std::char_traits<char>>(std::basic_ostream<char, std::char_traits<char>>&, std::thread::id)
-        movl    $.LC4, %esi
-        movq    %rax, %rdi
+        add     esp, 16
+        mov     eax, DWORD PTR [ebp+8]
+        mov     WORD PTR [eax+20], 4
+        mov     eax, DWORD PTR [ebp+8]
+        add     eax, 25
+        sub     esp, 12
+        push    eax
+        call    std::__n4861::suspend_always::await_ready() const
+        add     esp, 16
+        xor     eax, 1
+        test    al, al
+        je      .L55
+        mov     eax, DWORD PTR [ebp+8]
+        lea     ebx, [eax+25]
+        mov     eax, DWORD PTR [ebp+8]
+        lea     edx, [eax+12]
+        lea     eax, [ebp-16]
+        sub     esp, 8
+        push    edx
+        push    eax
+        call    std::__n4861::coroutine_handle<Task::promise_type>::operator std::__n4861::coroutine_handle<void>() const
+        add     esp, 12
+        sub     esp, 8
+        push    DWORD PTR [ebp-16]
+        push    ebx
+        call    std::__n4861::suspend_always::await_suspend(std::__n4861::coroutine_handle<void>) const
+        add     esp, 16
+        jmp     .L57
+.L45:
+        jmp     .L43
+.L55:
+        mov     eax, DWORD PTR [ebp+8]
+        add     eax, 25
+        sub     esp, 12
+        push    eax
+        call    std::__n4861::suspend_always::await_resume() const
+        add     esp, 16
+        sub     esp, 8
+        push    OFFSET FLAT:.LC1
+        push    OFFSET FLAT:_ZSt4cout
         call    std::basic_ostream<char, std::char_traits<char>>& std::operator<<<std::char_traits<char>>(std::basic_ostream<char, std::char_traits<char>>&, char const*)
-        movq    %rax, %rdx
-        movl    -20(%rbp), %eax
-        movl    %eax, %esi
-        movq    %rdx, %rdi
+        add     esp, 16
+        sub     esp, 8
+        push    OFFSET FLAT:_ZSt3hexRSt8ios_base
+        push    eax
+        call    std::ostream::operator<<(std::ios_base& (*)(std::ios_base&))
+        add     esp, 16
+        mov     edx, DWORD PTR [ebp+8]
+        mov     edx, DWORD PTR [edx+16]
+        sub     esp, 8
+        push    edx
+        push    eax
         call    std::ostream::operator<<(int)
-        movl    $.LC5, %esi
-        movq    %rax, %rdi
-        call    std::basic_ostream<char, std::char_traits<char>>& std::operator<<<std::char_traits<char>>(std::basic_ostream<char, std::char_traits<char>>&, char const*)
-        movl    $1, %edi
-        call    sleep
-        addl    $1, -20(%rbp)
-.L89:
-        cmpl    $14, -20(%rbp)
-        jle     .L90
-        movl    $0, %eax
-        movq    -8(%rbp), %rbx
+        add     esp, 16
+        sub     esp, 8
+        push    10
+        push    eax
+        call    std::basic_ostream<char, std::char_traits<char>>& std::operator<<<std::char_traits<char>>(std::basic_ostream<char, std::char_traits<char>>&, char)
+        add     esp, 16
+.L63:
+        mov     eax, DWORD PTR [ebp+8]
+        mov     DWORD PTR [eax], 0
+        mov     eax, DWORD PTR [ebp+8]
+        lea     edx, [eax+8]
+        lea     eax, [ebp-25]
+        sub     esp, 8
+        push    edx
+        push    eax
+        call    Task::promise_type::final_suspend()
+        add     esp, 12
+        mov     eax, DWORD PTR [ebp+8]
+        mov     WORD PTR [eax+20], 6
+        mov     eax, DWORD PTR [ebp+8]
+        add     eax, 26
+        sub     esp, 12
+        push    eax
+        call    std::__n4861::suspend_never::await_ready() const
+        add     esp, 16
+        xor     eax, 1
+        test    al, al
+        je      .L56
+        mov     eax, DWORD PTR [ebp+8]
+        lea     ebx, [eax+26]
+        mov     eax, DWORD PTR [ebp+8]
+        lea     edx, [eax+12]
+        lea     eax, [ebp-12]
+        sub     esp, 8
+        push    edx
+        push    eax
+        call    std::__n4861::coroutine_handle<Task::promise_type>::operator std::__n4861::coroutine_handle<void>() const
+        add     esp, 12
+        sub     esp, 8
+        push    DWORD PTR [ebp-12]
+        push    ebx
+        call    std::__n4861::suspend_never::await_suspend(std::__n4861::coroutine_handle<void>) const
+        add     esp, 16
+        jmp     .L57
+.L46:
+        jmp     .L43
+.L56:
+        mov     eax, DWORD PTR [ebp+8]
+        add     eax, 26
+        sub     esp, 12
+        push    eax
+        call    std::__n4861::suspend_never::await_resume() const
+        add     esp, 16
+        jmp     .L43
+.L68:
+        nop
+.L43:
+        mov     eax, DWORD PTR [ebp+8]
+        movzx   eax, BYTE PTR [eax+22]
+        movzx   eax, al
+        test    eax, eax
+        je      .L69
+        sub     esp, 8
+        push    28
+        push    DWORD PTR [ebp+8]
+        call    operator delete(void*, unsigned int)
+        add     esp, 16
+        jmp     .L69
+.L57:
+        jmp     .L69
+        sub     esp, 12
+        push    eax
+        call    __cxa_begin_catch
+        add     esp, 16
+        mov     eax, DWORD PTR [ebp+8]
+        movzx   eax, BYTE PTR [eax+23]
+        xor     eax, 1
+        test    al, al
+        je      .L62
+        call    __cxa_rethrow
+.L62:
+        mov     eax, DWORD PTR [ebp+8]
+        mov     DWORD PTR [eax], 0
+        mov     eax, DWORD PTR [ebp+8]
+        mov     WORD PTR [eax+20], 0
+        mov     eax, DWORD PTR [ebp+8]
+        add     eax, 8
+        sub     esp, 12
+        push    eax
+        call    Task::promise_type::unhandled_exception()
+        add     esp, 16
+        call    __cxa_end_catch
+        jmp     .L63
+        mov     ebx, eax
+        call    __cxa_end_catch
+        mov     eax, ebx
+        sub     esp, 12
+        push    eax
+        call    _Unwind_Resume
+.L69:
+        nop
+        mov     ebx, DWORD PTR [ebp-4]
         leave
         ret
-.LC6:
-        .string "thread::id of a non-executing thread"
-vtable for std::thread::_State_impl<std::thread::_Invoker<std::tuple<IntReader::await_suspend(std::__n4861::coroutine_handle<void>)::'lambda'()>>>:
-        .quad   0
-        .quad   typeinfo for std::thread::_State_impl<std::thread::_Invoker<std::tuple<IntReader::await_suspend(std::__n4861::coroutine_handle<void>)::'lambda'()>>>
-        .quad   std::thread::_State_impl<std::thread::_Invoker<std::tuple<IntReader::await_suspend(std::__n4861::coroutine_handle<void>)::'lambda'()>>>::~_State_impl() [complete object destructor]
-        .quad   std::thread::_State_impl<std::thread::_Invoker<std::tuple<IntReader::await_suspend(std::__n4861::coroutine_handle<void>)::'lambda'()>>>::~_State_impl() [deleting destructor]
-        .quad   std::thread::_State_impl<std::thread::_Invoker<std::tuple<IntReader::await_suspend(std::__n4861::coroutine_handle<void>)::'lambda'()>>>::_M_run()
-typeinfo for std::thread::_State_impl<std::thread::_Invoker<std::tuple<IntReader::await_suspend(std::__n4861::coroutine_handle<void>)::'lambda'()>>>:
-        .quad   vtable for __cxxabiv1::__si_class_type_info+16
-        .quad   typeinfo name for std::thread::_State_impl<std::thread::_Invoker<std::tuple<IntReader::await_suspend(std::__n4861::coroutine_handle<void>)::'lambda'()>>>
-        .quad   typeinfo for std::thread::_State
-typeinfo name for std::thread::_State_impl<std::thread::_Invoker<std::tuple<IntReader::await_suspend(std::__n4861::coroutine_handle<void>)::'lambda'()>>>:
-        .string "NSt6thread11_State_implINS_8_InvokerISt5tupleIJZN9IntReader13await_suspendENSt7__n486116coroutine_handleIvEEEUlvE_EEEEEE"
+hello_coroutine(_Z15hello_coroutinei.Frame*) (.destroy):
+        push    ebp
+        mov     ebp, esp
+        sub     esp, 8
+        mov     eax, DWORD PTR [ebp+8]
+        movzx   eax, WORD PTR [eax+20]
+        or      eax, 1
+        mov     edx, eax
+        mov     eax, DWORD PTR [ebp+8]
+        mov     WORD PTR [eax+20], dx
+        sub     esp, 12
+        push    DWORD PTR [ebp+8]
+        call    hello_coroutine(_Z15hello_coroutinei.Frame*) (.actor)
+        add     esp, 16
+        nop
+        leave
+        ret
+.LC2:
+        .string "---------"
+main:
+        lea     ecx, [esp+4]
+        and     esp, -16
+        push    DWORD PTR [ecx-4]
+        push    ebp
+        mov     ebp, esp
+        push    ecx
+        sub     esp, 20
+        mov     DWORD PTR [ebp-12], 63
+        lea     eax, [ebp-16]
+        sub     esp, 8
+        push    DWORD PTR [ebp-12]
+        push    eax
+        call    hello_coroutine(int)
+        add     esp, 12
+        sub     esp, 8
+        push    OFFSET FLAT:.LC2
+        push    OFFSET FLAT:_ZSt4cout
+        call    std::basic_ostream<char, std::char_traits<char>>& std::operator<<<std::char_traits<char>>(std::basic_ostream<char, std::char_traits<char>>&, char const*)
+        add     esp, 16
+        sub     esp, 12
+        lea     eax, [ebp-16]
+        push    eax
+        call    Task::resume()
+        add     esp, 16
+        mov     eax, 0
+        mov     ecx, DWORD PTR [ebp-4]
+        leave
+        lea     esp, [ecx-4]
+        ret
 ```
 
 这是x86-64架构上gcc 13.2生成的汇编代码，基于此有几点我们可以关注：
@@ -879,50 +789,6 @@ typeinfo name for std::thread::_State_impl<std::thread::_Invoker<std::tuple<IntR
 1.协程的状态以及上下文是保存在堆上的
 
 2.协程是一个状态机，编译器为协程的中断点/恢复点设置了一个状态，实现了跳转
-
-![协程创建](image.png)
-
-
-关键字：
-
-co_await
-co_await的操作对象必须是一个awaitable object，它需要定义如下几个函数来保证协程的正常执行：
-
-- await_ready() 如果返回true，代表协程已经准备就绪不需要挂起，否则挂起协程。
-- await_suspend() 该函数可以定义协程挂起时的行为，同时，该函数参数为协程句柄，这意味着我们可以在这个函数中那个恢复协程。
-- await_resume() 当协程恢复执行或者协程不需要挂起的时候，就会执行这个函数。
-
-c++预定义了两个awaitable object，分别是suspend_always和suspend_never，他们的区别就是await_ready的返回值不同，
-前者表示总是挂起，后者表示总是不挂起
-
-介绍另外两个之前，还需要注明下协程的返回值，举个例子：
-
-```c++
-struct Task {
-        class promise_type {
-        public:
-                Task get_return_object() { return {};}    //协程开始执行之前，会执行此函数，构造一个返回值
-                std::suspend_never initial_suspend() { return {};}   //协程开始执行后，会先执行此函数，这里可以控制协程是否挂起
-                std::suspend_never final_suspend() noexcept { return {};}  //协程结束执行时，会执行此函数，可以控制协程是否挂起，标准要求该函数必须是noexcept
-                void unhandled_exception() {}   //处理协程中的异常行为
-                void return_void() {}
-                std::suspend_always yield_value(T xxx) { /*...*/ return {}}   //co_yield 要求实现此方法，并将返回值传递给co_await
-
-                
-        };
-};
-```
-
-返回值的类型中需要定义一个promise_type，前面提到这些函数会在什么时候执行，所以我们可以通过自定义这些函数的行为来完全控制协程的行为，
-我们可以借助自定义这些函数来控制协程的行为。
-
-co_yield
-如果协程需要多次返回数据，就需要用到co_yield
-它要求promise_type 实现yield_value() 方法，该方法要求返回值必须是awaitable object，执行后将该对象传递给co_await
-
-co_return 
-它要求promise_type 实现 return_value() 方法，如果co_return不带任何参数，将会调用return_void()方法。
-该方法执行完之后将会执行final_suspend, 最后销毁协程。
 
 # 应用
 
@@ -1104,7 +970,6 @@ http://www.uml.org.cn/c%2B%2B/202503064.asp
 https://zplutor.github.io/2022/03/25/cpp-coroutine-beginner/
 https://www.bennyhuo.com/book/cpp-coroutines/02-generator.html#%E9%97%AE%E9%A2%98-1-%E6%97%A0%E6%B3%95%E7%A1%AE%E5%AE%9A%E6%98%AF%E5%90%A6%E5%AD%98%E5%9C%A8%E4%B8%8B%E4%B8%80%E4%B8%AA%E5%85%83%E7%B4%A0
 https://zhuanlan.zhihu.com/p/497224333
-https://lewissbaker.github.io/2017/11/17/understanding-operator-co-await
 https://lewissbaker.github.io/2017/09/25/coroutine-theory
 https://mthli.xyz/stackful-stackless/
 https://en.wikipedia.org/wiki/X86_calling_conventions#List_of_x86_calling_conventions
