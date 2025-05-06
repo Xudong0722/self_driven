@@ -61,11 +61,13 @@ int main() {
 ```
 
 程序的运行结果是：
+
 ```
 hello --------- coroutine 3f
 ```
 
 我们发现，打印完hello之后，程序没有继续打印后面的字符串，而是回到了main函数（协程调用方）中，在执行task.resume()之后又回到协程函数中继续执行，到此为止，我们可能会产生这些疑惑？
+
 - 1.为什么hello_coroutine没有顺序执行？
 - 2.如何跳转回调用方的？
 - 3.Task中的promise_type是什么？为什么要定义那些函数？
@@ -74,7 +76,7 @@ hello --------- coroutine 3f
 
 我们带着这些问题继续学习协程。
 协程在实现上主要分成两种：有栈协程和无栈协程。
-所谓的有栈协程就是指运行环境的恢复是通过函数栈的恢复实现的，而无栈协程是通过编译器对代码进行扩展实现的，是一个状态机。
+所谓的有栈协程就是指运行环境的恢复是通过函数栈的恢复实现的，而无栈协程是通过编译器对代码进行扩展实现的，思想和状态机类似。
 
 # 有栈协程
 
@@ -96,7 +98,6 @@ int main()
 ```
 
 x86-64 gcc 13.2 (-m32) 得到的汇编指令如下：
-参考Yang分享的win32汇编分享。
 
 ```
 func():
@@ -190,6 +191,7 @@ int main()
 ```
 
 swap_context.s
+
 ```c
   .globl swap_context
   .type swap_context, @function
@@ -249,7 +251,7 @@ gcc -m32 stackful_co.c swap_context.s -o test
 promise_type中的定制点：
 
 - initial_suspend: 在协程创建后调用， 可以控制是否挂起
-- final_suspend: 
+- final_suspend: 在协程执行结束后调用，这里也可以控制是否挂起
 - return_value: 保存协程返回值
 - unhandled_exception: 处理异常
 
@@ -1104,3 +1106,5 @@ https://www.bennyhuo.com/book/cpp-coroutines/02-generator.html#%E9%97%AE%E9%A2%9
 https://zhuanlan.zhihu.com/p/497224333
 https://lewissbaker.github.io/2017/11/17/understanding-operator-co-await
 https://lewissbaker.github.io/2017/09/25/coroutine-theory
+https://mthli.xyz/stackful-stackless/
+https://en.wikipedia.org/wiki/X86_calling_conventions#List_of_x86_calling_conventions
