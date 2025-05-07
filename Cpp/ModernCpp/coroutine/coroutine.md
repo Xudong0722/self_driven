@@ -66,17 +66,18 @@ int main() {
 hello --------- coroutine 3f
 ```
 
-我们发现，打印完hello之后，程序没有继续打印后面的字符串，而是回到了main函数（协程调用方）中，在执行task.resume()之后又回到协程函数中继续执行，到此为止，我们可能会产生这些疑惑？
+我们发现，打印完hello之后，程序没有继续打印后面的字符串，而是回到了main函数（协程调用方）中，在执行task.resume()之后又回到协程函数中继续执行。
+我们发现hello_coroutine复合协程的定义，可中断可恢复。
 
-- 1.为什么hello_coroutine没有顺序执行？
-- 2.如何跳转回调用方的？
+那么：
+- 1.如何跳转回调用方的？
 - 3.Task中的promise_type是什么？为什么要定义那些函数？
 - 4.co_await 关键字是什么？
 - ...
 
-我们带着这些问题继续学习协程。
+后续无栈协程中将会解决上述问题。
 协程在实现上主要分成两种：有栈协程和无栈协程。
-所谓的有栈协程就是指运行环境的恢复是通过函数栈的恢复实现的，而无栈协程是通过编译器对代码进行扩展实现的，思想和状态机类似。
+所谓的有栈协程就是指运行环境的恢复是通过类似函数调用栈的思想实现的，而无栈协程是通过编译器对代码进行扩展实现的，思想和状态机类似。
 
 # 有栈协程
 
@@ -87,7 +88,8 @@ hello --------- coroutine 3f
 
 ```c++
 int func() {
-    return 100;
+    int x = 100;
+    return x;
 }
 
 int main()
@@ -103,13 +105,15 @@ x86-64 gcc 13.2 (-m32) 得到的汇编指令如下：
 func():
         pushl   %ebp
         movl    %esp, %ebp
-        movl    $100, %eax
-        popl    %ebp
-        ret
+        subl    $16, %esp
+        movl    $100, -4(%ebp)
+        movl    -4(%ebp), %eax
+        leave     //movl %ebp %esp   +   popl %ebp
+        ret       //popl %eip  将之前保存的 caller 的 return address 出栈并赋值给 eip      
 main:
         pushl   %ebp
         movl    %esp, %ebp
-        call    func()
+        call    func()    //pushl %eip  + jmp func
         movl    $0, %eax
         popl    %ebp
         ret
