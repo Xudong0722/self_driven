@@ -365,6 +365,12 @@ int main() {
 }
 ```
 
+这是示例代码在x86上gcc 13.2生成的汇编代码，基于此有几点我们可以关注：
+
+1.协程的状态以及上下文是保存在堆上的
+
+2.协程是一个状态机，编译器为协程的中断点/恢复点设置了一个状态，实现了跳转
+
 ```
 Task::promise_type::get_return_object():
         push    ebp
@@ -784,14 +790,140 @@ main:
         ret
 ```
 
-这是x86-64架构上gcc 13.2生成的汇编代码，基于此有几点我们可以关注：
+c++20的协程比较抽象，他提供了定制点给程序员，让协程更加灵活，所以这也意味着我们如果要使用协程最好进行封装，让协程更好用，目前Github上已经有更多相关的的协程库：
 
-1.协程的状态以及上下文是保存在堆上的
+- GitHub - lewissbaker/cppcoro: A library of C++ coroutine abstractions for the coroutines TS
+- GitHub - alibaba/async_simple: Simple, light-weight and easy-to-use asynchronous components
 
-2.协程是一个状态机，编译器为协程的中断点/恢复点设置了一个状态，实现了跳转
+实际上，switch语句的效果和状态机思想比较相像，我们是否可以用switch case来模拟无栈协程？
+
+```c++
+#include <iostream>
+
+static int label = 0;
+
+int get_next(){
+  static int i = 0;
+  switch(label) {
+  case 0:{
+    for(; i<100; ++i) {
+      label = 1;
+      return i;
+      case 1:;
+    }
+  }
+  default:
+    break;
+  }
+}
+
+int main() {
+
+  for(int i = 0; i<10; ++i) {
+    printf("No.%d, get_next() = %d\n", i, get_next());
+  }
+  return 0;
+}
+```
+
+程序的运行结果是：
+
+```c++
+No.0, get_next() = 0
+No.1, get_next() = 1
+No.2, get_next() = 2
+No.3, get_next() = 3
+No.4, get_next() = 4
+No.5, get_next() = 5
+No.6, get_next() = 6
+No.7, get_next() = 7
+No.8, get_next() = 8
+No.9, get_next() = 9
+```
+
+我们接着这个思路将switch语句包装一下，定义几个宏：
+
+```c++
+#define CO_BEGIN static int label = 0; switch(label) { case 0:
+#define CO_YIELD(ret) do { label = __LINE__; return ret; case __LINE__:; } while(0)
+#define CO_AWAIT do{ label = __LINE__; return ; case __LINE__:; } while(0)
+#define CO_FINISH }
+```
+
+我们利用这几个宏将上面的程序改造一下，并添加一个func函数
+
+```c++
+#include <stdio.h>
+
+#define CO_BEGIN static int label = 0; switch(label) { case 0:
+#define CO_YIELD(ret) do { label = __LINE__; return ret; case __LINE__:; } while(0)
+#define CO_AWAIT do{ label = __LINE__; return ; case __LINE__:; } while(0)
+#define CO_FINISH }
+
+int get_next() {
+  static int i = 0;
+  CO_BEGIN
+    for(i = 0; i<10; ++i) {
+      CO_YIELD(i);
+    }
+  CO_FINISH
+}
+
+void func() {
+  CO_BEGIN
+    printf("Before suspend in func\n");
+    CO_AWAIT;
+    printf("After resume to func\n");
+    CO_AWAIT;
+    printf("Complete\n");
+  CO_FINISH
+}
+
+int main()
+{
+  for(int i  = 0; i<10; ++i) {
+    printf("No.%d, get_next() = %d\n", i, get_next());
+  }
+
+  printf("-------------\n");
+  func();
+  printf("-------------\n");
+  func();
+  printf("-------------\n");
+  func();
+  return 0;
+}
+```
+
+程序运行结果如下：
+
+```c++
+No.0, get_next() = 0
+No.1, get_next() = 1
+No.2, get_next() = 2
+No.3, get_next() = 3
+No.4, get_next() = 4
+No.5, get_next() = 5
+No.6, get_next() = 6
+No.7, get_next() = 7
+No.8, get_next() = 8
+No.9, get_next() = 9
+-------------
+Before suspend in func
+-------------
+After resume to func
+-------------
+Complete
+```
+
+显然，这个程序只能帮助我们更好理解无栈协程的思路。
 
 # 应用
 
+- 惰性序列生成器
+- IO多路复用，搭配epoll，配合定时器hook系统调用，可以在阻塞时通过切换协程让出CPU资源，定时器超时后再切换回来，一个很直接的例子是sleep() 函数。
+- TODO
+- 
 # 示例代码
 
 ```c++
@@ -963,13 +1095,19 @@ int main()
         return 0;
 }
 ```
+
 # 参考
 
 https://www.xinfinite.net/t/topic/3518 
 http://www.uml.org.cn/c%2B%2B/202503064.asp
 https://zplutor.github.io/2022/03/25/cpp-coroutine-beginner/
+https://en.wikipedia.org/wiki/X86_calling_conventions#Caller-saved_(volatile)_registers
 https://www.bennyhuo.com/book/cpp-coroutines/02-generator.html#%E9%97%AE%E9%A2%98-1-%E6%97%A0%E6%B3%95%E7%A1%AE%E5%AE%9A%E6%98%AF%E5%90%A6%E5%AD%98%E5%9C%A8%E4%B8%8B%E4%B8%80%E4%B8%AA%E5%85%83%E7%B4%A0
 https://zhuanlan.zhihu.com/p/497224333
 https://lewissbaker.github.io/2017/09/25/coroutine-theory
 https://mthli.xyz/stackful-stackless/
 https://en.wikipedia.org/wiki/X86_calling_conventions#List_of_x86_calling_conventions
+https://mthli.xyz/coroutines-in-c/
+https://www.chiark.greenend.org.uk/~sgtatham/coroutines.html
+https://www.xinfinite.net/t/topic/3518
+https://lewissbaker.github.io/
