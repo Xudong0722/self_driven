@@ -3,22 +3,22 @@
 #include <bitset>
 
 int32_t i32_to_zigzag(int32_t n){
-    return (n << 1) ^ (n >> 31);
+    return (n << 1) ^ (n >> 31);   //符号位放在最后，如果是负数就将其余的数据位全部取反，正数不变
 }
 
 int32_t zigzag_to_i32(int32_t n) {
-    return ((uint32_t)n >> 1) ^ -(n & 1);
+    return ((uint32_t)n >> 1) ^ -(n & 1);   //右移的时候不带符号位，负数的符号位会被补上0，正数不变
 }
 
 int write_to_buf(int32_t zigzag, uint8_t* buf, int size) {
   int res = 0;
   for(int i = 0; i<size; ++i) {
-    if((zigzag & (~0x7f)) == 0) {
+    if((zigzag & (~0x7f)) == 0) {   //对一个byte来说，最高位是1，其他位是0，说明这个byte是最后一个byte
         buf[i] = (uint8_t)zigzag;
         res = i + 1;
         break;
     }else{
-        buf[i] = (uint8_t)((zigzag & 0x7f) | 0x80);
+        buf[i] = (uint8_t)((zigzag & 0x7f) | 0x80); //否则，说明还有后续的byte，我们就将当前的byte的最高位置为1，其他位不变
         zigzag >>= 7;
     }
   }
@@ -30,10 +30,10 @@ int32_t read_from_buf(uint8_t* buf, int max_size) {
     int offset = 0;
     for(int i = 0; i < max_size; ++i, offset += 7) {
         uint8_t byte = buf[i];
-        if((byte & 0x80) != 0x80) {
+        if((byte & 0x80) != 0x80) {   //如果最高位是0，说明这个byte是最后一个byte，直接拼装
             res |= (byte << offset);
         }else{
-            res |= ((byte & 0x7f) << offset);
+            res |= ((byte & 0x7f) << offset);  //否则，说明后续还有byte，我们将当前的数据加上偏移量放在最后结果中
         }
     }
     return res;
