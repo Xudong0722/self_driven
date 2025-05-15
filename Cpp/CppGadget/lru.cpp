@@ -121,3 +121,11 @@ int main() {
     std::cout << "get(4) : " << res.first << " " << res.second << std::endl; // 4
     return 0;
 }
+
+
+/*
+TODO:
+1.容量的单位应该是字节，而不是元素个数
+2.线程安全
+
+*/
