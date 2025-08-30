@@ -208,3 +208,156 @@ Linux给文件描述提供了一个标志-FD_CLOSEXEC, 同时，open函数也有
 
 一个例子：
 root权限启动server，打开了一些root权限级别的文件和端口。降到普通用户，fork出了子进程，这时子进程是完全可以操作这些文件描述符的，这就带来了严重的安全隐患，所以上面的标记位(建议在open时就带上标记位)就派上用场了。
+
+## vfork
+
+早期的fork没有实现cow，所以引入了vfork，它创建子进程后会共享父进程的地址空间，当我们调用exec的时候才会申请自己的地址空间。注意vfork调用的子进程如果退出，要使用_exit
+
+
+## daemon守护进程的创建
+
+
+## 进程的终止
+
+### 正常退出
+- main函数return
+- exit
+- _exit
+
+### 异常退出
+- abort
+- 接收到信号，由信号终止
+
+------------------------------------
+
+_exit就是调用exit_grout系统调用，执行内核清理工作。
+
+那exit函数做了哪些事情？
+
+1. 执行用户通过atexit或者on_exit定义的清理函数
+2. 关闭所有打开的流，flush所有缓冲数据，通过tmpfile创建的临时文件会被删除
+3. 调用_exit
+
+关于第二点，冲刷缓冲区里的所有数据。做一些讨论，缓冲有三种方式：
+1. 无缓存，每次调用stdio库函数都会直接调用read/write系统调用。
+2. 行缓存，收到换行符之前，一律缓冲数据，除非缓冲区满了。
+3. 全缓存，缓冲区满之前不会调用read/write进行读写操作。
+
+标准输出流采用的是行缓存，我们可以通过一个程序来看一下exit和_exit在这一点的区别
+
+```c
+#include <stdio.h>
+#include <stdlib.h>
+#include <unistd.h>
+
+void foo() {
+    fprintf(stderr, "foo says bye.\n");
+}
+
+void bar() {
+    fprintf(stderr, "bar says bye.\n");
+}
+
+int main(int argc, char **argv) {
+    atexit(foo);
+    atexit(bar);
+    fprintf(stdout, "Oops, ... forgot a newline!");
+    sleep(2);
+
+    if (argc > 1 && strcmp(argv[1], "exit") == 0) {
+        exit(0);
+    }
+    if(argc > 1 && strcmp(argv[1], "_exit") == 0) {
+        _exit(0);
+    }
+    return 0;
+}
+```
+
+运行结果：
+```
+elvis@DQ:~/self_driven/Linux/cp4$ ./test exit
+bar says bye.
+foo says bye.
+Oops, ... forgot a newline!elvis@DQ:~/self_driven/Linux/cp4$ ./test
+bar says bye.
+foo says bye.
+Oops, ... forgot a newline!elvis@DQ:~/self_driven/Linux/cp4$ ./test _exit
+elvis@DQ:~/self_driven/Linux/cp4$ 
+```
+
+首先，stdout是行缓冲，只有遇到\n时或者缓冲区满时才会输出。
+
+如果我们用exit来退出，发现使用atexit注册的函数按照先入后出的的顺序执行了，然后刷新缓冲区，"Oops..."输出了。
+
+如果我们用_exit来退出，不会执行没有上述步骤，所以什么也没输出。
+
+return退出等价于exit退出， 因为调用main函数的程序会将返回值单程exit的入参， return n; ==> exit(n)
+
+## 等待子进程
+
+进程结束之后，并不会将所有的资源都立即释放，它仍会保留一些资源：进程控制块，内核栈等
+
+这些资源不释放是为了消亡前再提供一些信息，比如进程为什么退出，发生了多少次缺页中断，进程消耗了多少cpu时间等等。
+
+如果进程退出后立马就释放所有资源，那这些信息也就无从得知了。所以进程退出后变成**僵尸进程**的这段时间里，父进程可以通过
+
+wait/waitpid来获取这些信息，一旦信息传递出去，进程就可以彻底消失了。
+
+
+制造一个僵尸进程很简单：
+
+```c
+#include <stdio.h>
+#include <unistd.h>
+#include <sys/types.h>
+#include <stdlib.h>
+
+int main()
+{
+
+    pid_t pid;
+    pid = fork();
+
+    if(pid < 0) {
+        printf("error occurred!\n");
+    }else if(pid == 0) {
+        exit(0);
+    }else{
+        sleep(200);
+        wait(NULL);   // 获取僵尸进程(退出的子进程的退出信息)
+    }
+    return 0;
+}
+```
+
+在sleep的时间里，我们可以查看当前进程情况
+
+```
+2058125 pts/9    S+     0:00 ./test
+2058126 pts/9    Z+     0:00 [test] <defunct>
+```
+这个205816就是退出的子进程，Z代表Zombie，进程处于僵尸状态。而且这个僵尸进程使用kill是杀不死的。要清理僵尸进程有两种方法：
+
+- 父进程调用wait函数，为子进程收尸
+- 父进程退出，init进程会为子进程收尸
+
+## 等待子进程退出之 wait
+
+父进程调用wait， 子进程调用exit，是相互独立的，所以就存在两种case。
+
+- 子进程先退出，父进程后调用wait
+- 父进程调用wait，子进程后退出
+
+第一种情况就是子进程变成僵尸进程，父进程调用wait给子进程收尸，送他最后一程。
+
+第二种情况，父进程会阻塞住，等待任意一个子进程退出就会返回(因为wait调用并没有pid相关的入参，所以它并不知道具体要等待哪一个子进程)。
+
+wait方法的局限性：
+
+1. 不能等待特定的子进程，只能通过返回值判断是否是关心的子进程。
+2. 如果不存在子进程退出，wait只能阻塞，如果我们只是想获取退出子进程的退出状态的话，是不行的。
+3. wait只能发现子进程的终止事件，如果子进程因某信号停止，或因为某信号从停止恢复，wait无法探知。
+
+
+## 等待子进程退出之waitpid
