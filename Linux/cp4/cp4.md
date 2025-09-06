@@ -361,3 +361,86 @@ wait方法的局限性：
 
 
 ## 等待子进程退出之waitpid
+
+waitpid则解决了wait的一些问题，他可以精确等待某个进程，并且也可以在所有子进程中等待某个进程组id的进程，亦可以等待任意子进程。
+
+## 进程退出
+
+当进程调用exit，_exit， 或者是在main函数中执行return，最终都会调用exit_group来退出。
+
+```c
+_exit , exit , main中return
+          |
+          |
+          V
+      exit_group
+          |
+          |
+          V
+      do_group_exit
+          |
+          |
+          V
+    是否需要通知其他线程？  Y-->  zap_other_threads
+         |                             |
+         | <___________________________|
+         V
+     do_exit               
+```
+
+在do_exit函数中，进程会释放所有的资源，但是可能还有两件事情要做：
+
+1. 作为父进程，他可能还有子进程，如果他提出了，将来谁为他的子进程收尸 - forget_original_parent
+2. 作为子进程，他需要找到自己的父进程给自己收尸 - do_notify_parent
+
+第一件事情也分成两种情况， 一是如果退出的进程是多线程进程，就可以将子进程托付给兄弟线程，如果没有，就托付给init进程。
+找到新的父进程之后，就遍历所有的子进程，将他们的父亲替换成新找到的父进程。
+
+第二个事情要注意，如果是单线程的子进程比较简单，直接通知父进程就可以了。但如果是多线程，情况不一样，只有线程组中的主线程才有资格通知父进程(因为父进程创建子进程时子进程只有一个主线程，其他线程和他没有关系)，如果是非主线程退出，会直接调用release_task释放所有资源。但如果主线程退出时还有其他线程存在呢，这个时候并不会通知父进程，那什么时候通知呢？等到线程组蕞后一个线程退出后(调用release_task)，如果他发现自己是最后一个线程，就冒充线程组组长调用do_notify_parent通知父进程自己要退出了
+
+## exec家族
+
+exec的主要作用就是将新程序加载到进程的地址空间，丢弃旧有的程序，进程的栈，数据段，堆栈等会被新程序替换。
+
+### execve()
+
+```c
+#include <unistd.h>
+int execve(const char *pathname, char *const argv[],
+                  char *const envp[]);
+```
+
+execve()一般是在fork函数之后由子进程调用，和父进程分道扬镳。但也可以直接调用，比如下面这个例子。
+
+```c
+#include <unistd.h>
+#include <stdlib.h>
+#include <stdio.h>
+
+int main()
+{
+    char *args[] = {"/bin/ls", "-l", NULL};
+    if(execve("/bin/ls", args, NULL) == -1) {
+        perror("execve");
+        exit(EXIT_FAILURE);
+    }
+
+    puts("Never get here.");
+    exit(EXIT_SUCCESS);
+}
+```
+上面这个例子就直接在当前进程调用了execve，结果和在当前执行路径下执行ls-l一致。
+为什么"Never get here."没有打印呢，因为execve调用失败返回-1，但是成功就不会返回。斩断过去！面向未来！
+
+调用失败返回-1，我们可以检查errno判断原因，列出几种常见的错误码：
+
+- EACCESS  filename不是个普通文件，或者我们没有执行次文件的权限
+- ENOENT  文件不存在
+- ETXTBSY 存在其他进程尝试修改pathname所指代的文件
+- ENOEXEC 文件存在也可以执行，但是无法执行，比如windows的可执行程序在linux下无法执行
+
+
+
+### 如何判断文件是否可以执行的?
+
+内核中存在一个全局链表，名叫formats，挂到此链表的数据结构为struct linux_binfmt。操作系统启动后，所有可以运行可执行文件的解析器都会将自己注册在formats上，每个解析器都会将自己可执行文件的头128个字节-magic number存放在linxu_binprm的buf中，当内核要执行一个程序时，依次遍历链表中的解析器，看谁可以执行，如果有解析器匹配到了就交给他处理。不仅是系统默认的一些文件格式支持，我们也可以通过binfmt_misc注册解析器，比如wine就可以在linux上执行windows的exe文件。
