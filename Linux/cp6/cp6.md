@@ -330,3 +330,27 @@ int futex_wake(int *uaddr, int n);
 - ...
 
 某一时刻，线程1同时获取锁a和锁b，结束。。。这种情况就是活锁，比较耗费性能。不过我觉得这主要是代码的问题。。。
+
+## 读写锁
+
+很多时候，访问共享变量不一定意味着修改，如果大家都是只读，也就不需要互斥锁来控制访问。这种情况可以使用读写锁。
+
+
+创建和销毁读写锁
+```c
+#include <pthread.h>
+
+int pthread_rwlock_init(pthread_rwlock_t* rwlock, const pthread_rwlockattr_t *attr);
+
+int pthread_rwlock_destory(pthread_rwlock_t* rwlock);
+```
+
+读写锁的默认属性
+
+PTHREAD_PROCESS_PRIVATE - 进程内部竞争读写锁
+PTHREAD_RWLOCK_PREFER_READER_NP  - 读者优先， 如果等待队列有写锁，仍然允许申请者获得读锁
+
+读锁是共享模式，写锁是独占模式。
+
+
+### 读写锁的竞争策略
