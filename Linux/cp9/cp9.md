@@ -163,3 +163,46 @@ type = w
 通过对popen返回值执行write/fputs操作，往管道中写入，写入的内容传给执行command的进程
 
 ![w mode](image-1.png)
+
+
+## 命名管道FIFO
+
+前面提到的管道是无名管道，通过文件描述符在有亲缘关系的进程之间使用，如果两个进程没有任何关系就不能使用这种方法，FIFO就是解决这个问题。
+
+创建接口
+
+```c
+#include <sys/type.h>
+#include <sys/stat.h>
+int mkfifo(const char* pathname, mode_t mode);
+//mode表示文件的读写执行权限
+```
+
+还可以通过命令来创建
+
+```
+mkfifo [-m mode] pathname
+
+mknod [-m mode] pathname p
+```
+
+### 如何判断某个文件是否是fifo？
+
+```
+ls -l
+第一个字母是p
+```
+![ls -l](image-2.png)
+
+
+用接口判断
+
+```c
+#include <sys/types.h>
+#include <sys/stat.h>
+#include <unistd.h>
+
+int stat(const char* path, struct stat *buf);
+int fstat(int fd, struct stat* buf);
+S_ISFIFO(buf->st_mode);
+```
